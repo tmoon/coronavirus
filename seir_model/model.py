@@ -38,9 +38,9 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn):
     accept_log_prob = min(0, fn(x_new, data_new)-fn(x, data))
     if np.random.binomial(1, np.exp(accept_log_prob)):
         # if accept_log_prob < 0: print("accepted new state")
-        return x_new, data_new, (fn(x_new, data_new), fn(x, data)), accept_log_prob
+        return x_new, data_new, fn(x_new, data_new), fn(x, data)
     else:
-        return x, data, (fn(x_new, data_new), fn(x, data)), accept_log_prob
+        return x, data, fn(x_new, data_new), fn(x, data)
 
 
 
@@ -98,6 +98,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     params = [np.random.gamma(a, b) for (a, b) in priors]
     beta, q, g, gamma = params
     s0, e0, i0 = inits
+    epsilon = 1e-16
     
     # initialize I, S, E, P
     I = compute_I(inits[2], t_end, C, D)
@@ -105,10 +106,12 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     E = compute_E(e0, t_end, B, C)
     P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I, N)
     
+    # rep invariants
     # I, S, E should be non-negative
     assert (I >= 0).all()    
     assert (S >= 0).all()
     assert (E >= 0).all()
+    assert (E+I > 0).all()
     # P is a list of binomial parameters
     assert (1 >= P).all() and (P >= 0).all()
 
@@ -116,24 +119,27 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     saved_params = []
     for i in range(n_iter):
         # MCMC update for B, S, E
-        B, S, E, log_sample_prob, log_accept_prob = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m)
+        B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
         assert sum(B) == m
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
-        params, P = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl)
-        if i >= n_burn_in and i % 10 == 0:
+        params, P, R0 = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
+        if i >= n_burn_in and i % 100 == 0:
             saved_params.append(params)
         if i % 10 == 0:
-            params_r = np.round(params, 4)
-            print(f"iter. {i}=> beta:{params_r[0]},  q:{params_r[1]},  g:{params_r[2]},  gamma:{params_r[3]},  "
-                + f"log sample prob(new, old):{np.round(log_sample_prob, 5)},  diff:{np.round(log_sample_prob[0]-log_sample_prob[1], 5)}")
-        if i % 500 == 0:
-            print(f"best B:{B}")
+            params_r = np.round(params+[log_prob_new, log_prob_old, log_prob_new-log_prob_old, params[0]/params[3], sum(R0[-14:-7])], 5)
+            print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
+                # + f"log prob new:{params_r[4]}  log prob old:{params_r[5]}  diff:{params_r[6]}")
+                # + f"log prob diff:{params_r[6]}"
+                + f"  R0:{params_r[7]}")#  R0 -2nd week:{params_r[8]}")
+        if i % 50 == 0:
+            pass
+            # print(f"best B so far:\n{B}")
 
     return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0)
 
 
-def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m):
+def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon):
     """
     get a sample from p(B|C, D, params) using metropolis hastings
     """
@@ -145,10 +151,9 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m):
         returns: log likelihood of p(B|data)
         """
         S, E = data
-        assert (S >= x).all()
-        assert (x >= 0).all()
+        # assert (S >= x).all()
+        # assert (x >= 0).all()
         # add epsilon to prevent log 0.
-        epsilon = 1e-12
         return np.sum(np.log(sp.stats.binom(S, P).pmf(B)+epsilon))
         
 
@@ -170,26 +175,25 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m):
         S, E = data
         n_tries = 0
         x_new = np.copy(x)
-        while n_tries < 10000:
+        while n_tries < 1000:
             n_tries += 1
-            attempt = 1
-    
-            t_new = np.random.choice(np.nonzero(x_new)[0], 1, replace=True)
-            t_tilde = np.random.choice(range(t_end), 1, replace=True)
-
+            t_new = np.random.choice(np.nonzero(x_new)[0], min(10, len(np.nonzero(x_new)[0])), replace=False)
+            t_tilde = np.random.choice(range(t_end), len(t_new), replace=False)
+            # print(t_new)
             x_new[t_new] -= 1
             x_new[t_tilde] += 1
             S_new = compute_S(s0, t_end, x_new)
             E_new = compute_E(e0, t_end, x_new, C)
 
             if conditions_fn(x_new, [S_new, E_new]):
-                assert (S_new >= x_new).all()
-                assert(x_new >= 0).all()
+                # assert (S_new >= x_new).all()
+                # assert(x_new >= 0).all()
                 # print("found new B")
                 return x_new, [S_new, E_new]
             else:
                 x_new[t_new] += 1
                 x_new[t_tilde] -= 1
+        # assert (E >= 0).all() and (E+I > 0).all()
         return x, [S, E]
 
     def conditions_fn(x, data):
@@ -198,11 +202,11 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m):
 
     s0, e0, i0 = inits
     data = [S, E]
-    B, data, log_sample_prob, log_accept_prob = metropolis_hastings(B, data, fn, proposal, conditions_fn)
-    return [B] + data + [log_sample_prob, log_accept_prob]
+    B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, conditions_fn)
+    return [B] + data + [log_prob_new, log_prob_old]
 
 
-def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_stds, N, t_end, t_ctrl):
+def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_stds, N, t_end, t_ctrl, epsilon):
     """
     update beta, q, g, gamma with independent MCMC sampling
     each of B, C, D is a list of binomial distributions. The prior is a gamma distribution for each parameter 
@@ -233,20 +237,19 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
 
         # log likelihood
         # add epsilon to prevent log 0.
-        epsilon = 1e-12
 
         logB = np.sum(np.log(sp.stats.binom(S, P).pmf(B)+epsilon))
         logC = np.sum(np.log(sp.stats.binom(E, pC).pmf(C)+epsilon))
         logD = np.sum(np.log(sp.stats.binom(I, pR).pmf(D)+epsilon))
 
-        assert not np.isnan(logB)
-        assert not np.isnan(logC)
-        assert not np.isnan(logD)
+        # assert not np.isnan(logB)
+        # assert not np.isnan(logC)
+        # assert not np.isnan(logD)
 
         # log prior
         a, b = other_data['gamma_' + str(other_data['which_param'])]
         log_prior = np.log(sp.stats.gamma(a, b).pdf(x)+epsilon)
-        assert not np.isnan(log_prior)
+        # assert not np.isnan(log_prior)
         
         return logB + logC + logD + log_prior
 
@@ -266,9 +269,8 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
             params_new[other_data['which_param']] = x_new
             if conditions_fn(x_new, [params_new, other_data]):
                 return x_new, [params_new, other_data]
-        print("sample not found")
+        # print("sample not found")
         return x, data
-
     
     def conditions_fn(x, data):
         """
@@ -277,7 +279,7 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         return x > 0
 
     # initialize other_data
-    other_data = {}#'N' : N, 't_ctrl': t_ctrl, 't_end': t_end, 'B': B, 'C':C, 'D':D, 'I':I, 'S':S, 'E':E}
+    other_data = {}
     for i in range(len(params)):
         other_data['gamma_'+str(i)] = prior_params[i]
         other_data['sigma_'+str(i)] = rand_walk_stds[i]
@@ -288,7 +290,8 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         param, _, _, _ = metropolis_hastings(params[i], [params, other_data], fn, proposal, conditions_fn)
         params_new.append(param)
     
-    return params_new, compute_P(transmission_rate(params_new[0], params_new[1], t_ctrl, t_end), I, N)
+    t_rate = transmission_rate(params_new[0], params_new[1], t_ctrl, t_end)
+    return params_new, compute_P(t_rate, I, N), t_rate/params_new[3]
 
 def compute_S(s0, t_end, B):
     """
@@ -329,12 +332,12 @@ def transmission_rate(beta, q, t_ctrl, t_end):
     trans_rate = np.ones((t_end, )) * beta
     if t_ctrl < t_end:
         ctrl_indices = np.array(range(t_ctrl, t_end))
-        trans_rate[ctrl_indices] *= np.exp(-q*(ctrl_indices-t_ctrl))
+        trans_rate[ctrl_indices] = beta* np.exp(-q*(ctrl_indices-t_ctrl))
 
-    try: assert trans_rate.all() >= 0
-    except AssertionError as e:
-        print(beta, q, trans_rate[trans_rate < 0])
-        raise e
+    # try: assert trans_rate.all() >= 0
+    # except AssertionError as e:
+    #     print(beta, q, trans_rate[trans_rate < 0])
+    #     raise e
     return trans_rate
 
 def compute_P(trans_rate, I, N):
@@ -377,7 +380,7 @@ def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
         R[t] = N - S[t] - E[t] - I[t]
 
         # print(t, B[t], C[t], D[t], E[t], I[t], P[t])
-    if sum(B) > 20:
+    if sum(B) > 20 and sum(B) > sum(D):
         return sum(B), C, D
     else:
         return create_dataset(inits, beta, q, g, gamma, t_ctrl, tau)
@@ -388,13 +391,13 @@ if __name__ == '__main__':
 
     
     N = 500
-    t_end = 171
+    t_end = 100
     inits = [800, 1, 0]
     priors = [(2, 10)]*4
     rand_walk_stds = [2, 2, 2, 2]
-    t_ctrl = 130
-    tau = 172
-    n_iter = 15000
-    n_burn_in = 12000
+    t_ctrl = 70
+    tau = 101
+    n_iter = 30000
+    n_burn_in = 20000
     m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     print(train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:])
