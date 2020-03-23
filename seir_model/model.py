@@ -5,14 +5,14 @@ import matplotlib.pyplot as plt
 
 """
 The model learns its parameters from C and D. see docstring of train()
-These parameters can be used for R0 estimation and other predictions
+These parameters can be used for R0 estimation and for making other 
+predictions.
 
-Currently, I generated a dummy dataset that was in paper section 3.3
-I used N=s0=500 instead of 5,364,500 for speed. see __name__ == __main__:
-
+I generated a dummy dataset that was in paper section 3.3. I set 
+N=s0=500 instead of 5364500 for speed. see __name__ == __main__:
 
 The model should be able to estimate the parameters, but it's stuck in 
-the sampling.
+the sampling step for unobserved variable B.
 
 main issue: the MCMC in update_data() is not initializing to
             any non-zero value.
@@ -37,9 +37,10 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn):
     x_new, data_new = proposal(x, data, conditions_fn)
     accept_log_prob = min(0, fn(x_new, data_new)-fn(x, data))
     if np.random.binomial(1, np.exp(accept_log_prob)):
-        return x_new, data_new, fn(x_new, data_new), np.exp(accept_log_prob)
+        # if accept_log_prob < 0: print("accepted new state")
+        return x_new, data_new, (fn(x_new, data_new), fn(x, data)), accept_log_prob
     else:
-        return x, data, fn(x, data), np.exp(accept_log_prob)
+        return x, data, (fn(x_new, data_new), fn(x, data)), accept_log_prob
 
 
 
@@ -52,10 +53,11 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
         s0 = S(0): number of suspected individuals at t=0
         e0 = E(0): number of exposed individuals at t=0
         i0 = I(0): number of infected individuals at t=0
+             (this is called a in paper)
     priors = list of gamma prior parameters for four model parameters.
              The parameters are:
                 beta: uncontrolled transmission rate
-                q: parameter for time dependent transmission rate
+                q: parameter for time dependent controlled transmission rate
                 g: 1/mean incubation period
                 gamma: 1/mean infectious period
 
@@ -90,6 +92,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     # initialize
     B = np.zeros((t_end,))
     B[0] = m
+    assert np.sum(B) == m
 
     # initialize model parameters
     params = [np.random.gamma(a, b) for (a, b) in priors]
@@ -113,7 +116,8 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     saved_params = []
     for i in range(n_iter):
         # MCMC update for B, S, E
-        B, S, E, log_sample_prob, accept_prob = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m)
+        B, S, E, log_sample_prob, log_accept_prob = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m)
+        assert sum(B) == m
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
         params, P = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl)
@@ -121,7 +125,10 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
             saved_params.append(params)
         if i % 10 == 0:
             params_r = np.round(params, 4)
-            print(f"iter. {i}=> beta:{params_r[0]},  q:{params_r[1]},  g:{params_r[2]},  gamma:{params_r[3]}, accept prob:{accept_prob}")
+            print(f"iter. {i}=> beta:{params_r[0]},  q:{params_r[1]},  g:{params_r[2]},  gamma:{params_r[3]},  "
+                + f"log sample prob(new, old):{np.round(log_sample_prob, 5)},  diff:{np.round(log_sample_prob[0]-log_sample_prob[1], 5)}")
+        if i % 500 == 0:
+            print(f"best B:{B}")
 
     return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0)
 
@@ -137,11 +144,13 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m):
         B(t) has distribution Binom(S(t), P(t))
         returns: log likelihood of p(B|data)
         """
-        P, I, S, E, m = data
+        S, E = data
+        assert (S >= x).all()
+        assert (x >= 0).all()
         # add epsilon to prevent log 0.
-        epsilon = 1e-20
-        return np.sum(np.log(sp.stats.binom(S, P).pmf(x)+epsilon))
-
+        epsilon = 1e-12
+        return np.sum(np.log(sp.stats.binom(S, P).pmf(B)+epsilon))
+        
 
     def proposal(x, data, conditions_fn):
         """
@@ -158,44 +167,39 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m):
             7. Verify I+E>0
         The authors suggested to select N*10% indices instead of 1 for faster convergence
         """
-        P, I, S, E, m = data
-        assert sum(x) == m
+        S, E = data
         n_tries = 0
-        x_new = x[:]
-        while n_tries < 300:
+        x_new = np.copy(x)
+        while n_tries < 10000:
             n_tries += 1
             attempt = 1
     
-            x_new = x[:]
-            t_new = np.random.choice(range(t_end), max(1, int(N * .10)))
-            
-            while x_new[t_new].any() <1:
-                t_new = np.random.choice(range(t_end), max(1, int(N * .10)))
-                attempt += 1
-                if attempt % 100 == 0:
-                    print("trying to sample B...")
-            if attempt > 100:
-                print("found new non-negative B")
+            t_new = np.random.choice(np.nonzero(x_new)[0], 1, replace=True)
+            t_tilde = np.random.choice(range(t_end), 1, replace=True)
+
             x_new[t_new] -= 1
-            t_tilde = np.random.choice(range(t_end), max(1, int(N * .10)))
             x_new[t_tilde] += 1
-            
             S_new = compute_S(s0, t_end, x_new)
             E_new = compute_E(e0, t_end, x_new, C)
 
-            if conditions_fn(x_new, [P, I, S_new, E_new, m]):
-                print("new B satisfies all conditions")
-                return x_new, [P, I, S_new, E_new, m]
-        return x, [P, I, S, E, m]
+            if conditions_fn(x_new, [S_new, E_new]):
+                assert (S_new >= x_new).all()
+                assert(x_new >= 0).all()
+                # print("found new B")
+                return x_new, [S_new, E_new]
+            else:
+                x_new[t_new] += 1
+                x_new[t_tilde] -= 1
+        return x, [S, E]
 
     def conditions_fn(x, data):
-        P, I, S, E, m = data
-        return sum(B) == m and (E>=0).all() and (E+I>0).all()
+        S, E = data
+        return sum(x) == m and (E>=0).all() and (E+I>0).all()
 
     s0, e0, i0 = inits
-    data = [P, I, S, E, m]
-    B, data, log_sample_prob, accept_prob = metropolis_hastings(B, data, fn, proposal, conditions_fn)
-    return [B] + data[2:4] + [log_sample_prob, accept_prob]
+    data = [S, E]
+    B, data, log_sample_prob, log_accept_prob = metropolis_hastings(B, data, fn, proposal, conditions_fn)
+    return [B] + data + [log_sample_prob, log_accept_prob]
 
 
 def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_stds, N, t_end, t_ctrl):
@@ -216,12 +220,12 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         other_data['which_param'] stores the parameter to update. it is an index of params
 
         """
-        params, other_data = data[0], data[1]
+        params, other_data = data
         beta, q, g, gamma = params
         
-        N, t_ctrl, t_end = other_data['N'], other_data['t_ctrl'], other_data['t_end']
-        B, C, D = other_data['B'], other_data['C'], other_data['D']
-        I, S, E = other_data['I'], other_data['S'], other_data['E']
+        # N, t_ctrl, t_end = other_data['N'], other_data['t_ctrl'], other_data['t_end']
+        # B, C, D = other_data['B'], other_data['C'], other_data['D']
+        # I, S, E = other_data['I'], other_data['S'], other_data['E']
 
         pC = 1-np.exp(-g)
         pR = 1-np.exp(-gamma)
@@ -229,7 +233,7 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
 
         # log likelihood
         # add epsilon to prevent log 0.
-        epsilon = 1e-20
+        epsilon = 1e-12
 
         logB = np.sum(np.log(sp.stats.binom(S, P).pmf(B)+epsilon))
         logC = np.sum(np.log(sp.stats.binom(E, pC).pmf(C)+epsilon))
@@ -273,7 +277,7 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         return x > 0
 
     # initialize other_data
-    other_data = {'N' : N, 't_ctrl': t_ctrl, 't_end': t_end, 'B': B, 'C':C, 'D':D, 'I':I, 'S':S, 'E':E}
+    other_data = {}#'N' : N, 't_ctrl': t_ctrl, 't_end': t_end, 'B': B, 'C':C, 'D':D, 'I':I, 'S':S, 'E':E}
     for i in range(len(params)):
         other_data['gamma_'+str(i)] = prior_params[i]
         other_data['sigma_'+str(i)] = rand_walk_stds[i]
@@ -281,7 +285,7 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
     params_new = []
     for i in range(len(params)):
         other_data['which_param'] = i
-        param, _, log_sample_prob, _ = metropolis_hastings(params[i], [params, other_data], fn, proposal, conditions_fn)
+        param, _, _, _ = metropolis_hastings(params[i], [params, other_data], fn, proposal, conditions_fn)
         params_new.append(param)
     
     return params_new, compute_P(transmission_rate(params_new[0], params_new[1], t_ctrl, t_end), I, N)
@@ -341,7 +345,7 @@ def compute_P(trans_rate, I, N):
         raise ValueError
 
 
-def construct_model(inits, beta, q, g, gamma, t_ctrl, tau):
+def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
     s0, e0, i0 = inits
     N = s0
     S = np.zeros((tau-1,))
@@ -372,7 +376,11 @@ def construct_model(inits, beta, q, g, gamma, t_ctrl, tau):
         I[t+1] = I[t] + C[t] - D[t]
         R[t] = N - S[t] - E[t] - I[t]
 
-    return sum(B), C, D
+        # print(t, B[t], C[t], D[t], E[t], I[t], P[t])
+    if sum(B) > 20:
+        return sum(B), C, D
+    else:
+        return create_dataset(inits, beta, q, g, gamma, t_ctrl, tau)
 
 
 
@@ -381,12 +389,12 @@ if __name__ == '__main__':
     
     N = 500
     t_end = 171
-    inits = [500, 1, 0]
+    inits = [800, 1, 0]
     priors = [(2, 10)]*4
     rand_walk_stds = [2, 2, 2, 2]
     t_ctrl = 130
     tau = 172
-    n_iter = 10000
-    n_burn_in = 8000
-    m, C, D = construct_model(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
+    n_iter = 15000
+    n_burn_in = 12000
+    m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     print(train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:])
