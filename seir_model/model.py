@@ -95,7 +95,10 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     assert np.sum(B) == m
 
     # initialize model parameters
-    params = [np.random.gamma(a, b) for (a, b) in priors]
+    params = [1, 1, 1, 1]
+    # params[0] = 0.2
+    # params[1] = 0.2
+    # params[2] = 0.2
     beta, q, g, gamma = params
     s0, e0, i0 = inits
     epsilon = 1e-16
@@ -123,15 +126,16 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
         assert sum(B) == m
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
-        params, P, R0 = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
+        params, P, R0, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
         if i >= n_burn_in and i % 100 == 0:
             saved_params.append(params)
-        if i % 10 == 0:
+        if i % 80 == 0:
             params_r = np.round(params+[log_prob_new, log_prob_old, log_prob_new-log_prob_old, params[0]/params[3], sum(R0[-14:-7])], 5)
             print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
-                # + f"log prob new:{params_r[4]}  log prob old:{params_r[5]}  diff:{params_r[6]}")
+                + f"log prob new:{params_r[4]}  log prob old:{params_r[5]}  diff:{params_r[6]}"
                 # + f"log prob diff:{params_r[6]}"
-                + f"  R0:{params_r[7]}")#  R0 -2nd week:{params_r[8]}")
+                # + f"  R0:{params_r[7]}")#  R0 -2nd week:{params_r[8]}"
+                )
         if i % 50 == 0:
             pass
             # print(f"best B so far:\n{B}")
@@ -179,7 +183,7 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon
             n_tries += 1
             t_new = np.random.choice(np.nonzero(x_new)[0], min(10, len(np.nonzero(x_new)[0])), replace=False)
             t_tilde = np.random.choice(range(t_end), len(t_new), replace=False)
-            # print(t_new)
+            
             x_new[t_new] -= 1
             x_new[t_tilde] += 1
             S_new = compute_S(s0, t_end, x_new)
@@ -224,8 +228,7 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         other_data['which_param'] stores the parameter to update. it is an index of params
 
         """
-        params, other_data = data
-        beta, q, g, gamma = params
+        beta, q, g, gamma = x
         
         # N, t_ctrl, t_end = other_data['N'], other_data['t_ctrl'], other_data['t_end']
         # B, C, D = other_data['B'], other_data['C'], other_data['D']
@@ -247,51 +250,54 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         # assert not np.isnan(logD)
 
         # log prior
-        a, b = other_data['gamma_' + str(other_data['which_param'])]
-        log_prior = np.log(sp.stats.gamma(a, b).pdf(x)+epsilon)
+        log_prior = 0
+        for i in range(4):
+            a, b = prior_params[i]
+            log_prior += np.log(sp.stats.gamma(a, b).pdf(x[i])+epsilon)
         # assert not np.isnan(log_prior)
         
-        return logB + logC + logD + log_prior
+        return logB+logC+logD+log_prior
 
     def proposal(x, data, conditions_fn):
         """
         see docstring for previous function
         """
-        params, other_data = data
-        beta, q, g, gamma = params
-        sigma = other_data['sigma_' + str(other_data['which_param'])]
-        
+        # sigma = other_data['sigma_' + str(other_data['which_param'])]
         n_tries = 0
-        while n_tries < 100:
+        x_new = np.copy(x)
+        while n_tries < 1000:
             n_tries += 1
-            x_new = np.random.normal(x, sigma)
-            params_new = params[:]
-            params_new[other_data['which_param']] = x_new
-            if conditions_fn(x_new, [params_new, other_data]):
-                return x_new, [params_new, other_data]
-        # print("sample not found")
+            x_new = np.random.normal(x, rand_walk_stds)
+            # params_new = params[:]
+            # params_new[other_data['which_param']] = x_new
+            if conditions_fn(x_new, data):
+                return x_new, data
+            else:
+                x_new[3] = x[3]
+        print("sample not found")
         return x, data
     
     def conditions_fn(x, data):
         """
         all parameters should be non-negative
         """
-        return x > 0
+        return (x > 0).all()
 
     # initialize other_data
-    other_data = {}
-    for i in range(len(params)):
-        other_data['gamma_'+str(i)] = prior_params[i]
-        other_data['sigma_'+str(i)] = rand_walk_stds[i]
+    # other_data = {}
+    # for i in range(len(params)):
+    #     other_data['gamma_'+str(i)] = prior_params[i]
+    #     other_data['sigma_'+str(i)] = rand_walk_stds[i]
 
-    params_new = []
-    for i in range(len(params)):
-        other_data['which_param'] = i
-        param, _, _, _ = metropolis_hastings(params[i], [params, other_data], fn, proposal, conditions_fn)
-        params_new.append(param)
+    # params_new = []
+    # for i in range(len(params)):
+    #     other_data['which_param'] = i
+    #     param, _, _, _ = metropolis_hastings(params[i], [params, other_data], fn, proposal, conditions_fn)
+    #     params_new.append(param)
+    params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
     
     t_rate = transmission_rate(params_new[0], params_new[1], t_ctrl, t_end)
-    return params_new, compute_P(t_rate, I, N), t_rate/params_new[3]
+    return params_new.tolist(), compute_P(t_rate, I, N), t_rate/params_new[3], log_prob_new, log_prob_old
 
 def compute_S(s0, t_end, B):
     """
@@ -351,37 +357,36 @@ def compute_P(trans_rate, I, N):
 def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
     s0, e0, i0 = inits
     N = s0
-    S = np.zeros((tau-1,))
-    E = np.zeros((tau-1,))
-    I = np.zeros((tau-1,))
-    R = np.zeros((tau-1,))
-    B = np.zeros((tau-1,))
-    C = np.zeros((tau-1,))
-    D = np.zeros((tau-1,))
-    P = np.zeros((tau-1,))
+    S = [s0]
+    E = [e0]
+    I = [i0]
+    R = [N - s0 - e0 - i0]
+    B = []
+    C = []
+    D = []
+    P = []
     t_rate = transmission_rate(beta, q, t_ctrl, tau-1)
-    S[0] = s0
-    E[0] = e0
-    I[0] = i0
-    R[0] = N - s0 - e0 - i0
     
-    for t in range(0, tau-2):
-        P[t] = 1-np.exp(-t_rate[t]*I[t]/N)
+    t = 0
+    while t < tau - 1 and I[t] + E[t] > 0:
+        P.append(1-np.exp(-t_rate[t]*I[t]/N))
         pC = 1-np.exp(-g)
         pR = 1-np.exp(-gamma)
 
-        B[t] = np.random.binomial(S[t], P[t])
-        C[t] = np.random.binomial(E[t], pC)
-        D[t] = np.random.binomial(I[t], pR)
+        B.append(np.random.binomial(S[t], P[t]))
+        C.append(np.random.binomial(E[t], pC))
+        D.append(np.random.binomial(I[t], pR))
 
-        S[t+1] = S[t] - B[t]
-        E[t+1] = E[t] + B[t] - C[t]
-        I[t+1] = I[t] + C[t] - D[t]
-        R[t] = N - S[t] - E[t] - I[t]
+        S.append(S[t] - B[t])
+        E.append(E[t] + B[t] - C[t])
+        I.append(I[t] + C[t] - D[t])
+        R.append(N - S[t] - E[t] - I[t])
+        t += 1
 
         # print(t, B[t], C[t], D[t], E[t], I[t], P[t])
-    if sum(B) > 20 and sum(B) > sum(D):
-        return sum(B), C, D
+    if sum(B) > 20:
+        print(f"sample size:{t}")
+        return sum(B), np.array(C), np.array(D)
     else:
         return create_dataset(inits, beta, q, g, gamma, t_ctrl, tau)
 
@@ -393,11 +398,11 @@ if __name__ == '__main__':
     N = 500
     t_end = 100
     inits = [800, 1, 0]
-    priors = [(2, 10)]*4
-    rand_walk_stds = [2, 2, 2, 2]
-    t_ctrl = 70
-    tau = 101
-    n_iter = 30000
-    n_burn_in = 20000
+    priors = [(20, 40)]*4
+    rand_walk_stds = [0.001, 0.001, 0.001, .001]
+    t_ctrl = 170
+    tau = 1000
+    n_iter = 80000
+    n_burn_in = 60000
     m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     print(train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:])
