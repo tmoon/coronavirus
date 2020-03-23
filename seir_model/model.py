@@ -360,7 +360,6 @@ def construct_model(inits, beta, q, g, gamma, t_ctrl, tau):
     
     for t in range(0, tau-2):
         P[t] = 1-np.exp(-t_rate[t]*I[t]/N)
-        print(t, P[t])
         pC = 1-np.exp(-g)
         pR = 1-np.exp(-gamma)
 
@@ -390,5 +389,4 @@ if __name__ == '__main__':
     n_iter = 10000
     n_burn_in = 8000
     m, C, D = construct_model(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
-    print(m, C, D)
-    # print(train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:])
+    print(train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:])
