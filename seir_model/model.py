@@ -20,7 +20,7 @@ main issue: the MCMC in update_data() is not initializing to
 """
 
 
-def metropolis_hastings(x, data, fn, proposal, conditions_fn):
+def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1):
     """
     get 1 sample from a distribution p(x) ~ k*fn(x) given proposal
     distribution proposal(x) with metropolis hastings algorithm
@@ -33,14 +33,17 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn):
 
     returns: one sample from p(x) and corresponding data
     """
-
-    x_new, data_new = proposal(x, data, conditions_fn)
-    accept_log_prob = min(0, fn(x_new, data_new)-fn(x, data))
-    if np.random.binomial(1, np.exp(accept_log_prob)):
-        # if accept_log_prob < 0: print("accepted new state")
-        return x_new, data_new, fn(x_new, data_new), fn(x, data)
-    else:
-        return x, data, fn(x_new, data_new), fn(x, data)
+    old_log_prob = fn(x, data)
+    while burn_in:
+        burn_in -= 1
+        x_new, data_new = proposal(x, data, conditions_fn)
+        accept_log_prob = min(0, fn(x_new, data_new)-fn(x, data))
+        if np.random.binomial(1, np.exp(accept_log_prob)):
+            # if accept_log_prob < 0: print("accepted new state")
+            x, data = x_new, data_new #, fn(x_new, data_new), fn(x, data)
+        else:
+            pass
+    return x, data, fn(x, data), old_log_prob
 
 
 
@@ -120,22 +123,22 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
 
     # initialize B and params
     print(f"n_burn_in:{n_burn_in}")
-    print("initializing B...")
-    for i in range(n_burn_in):
-        B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
-        assert sum(B) == m
-        if i % 200 == 0:
-            params_r = np.round(params, 5)
-            print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
-                )
+    # print("initializing B...")
+    # for i in range(n_burn_in):
+    #     B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
+    #     assert sum(B) == m
+    #     if i % 200 == 0:
+    #         params_r = np.round(params, 5)
+    #         print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
+    #             )
 
-    print("initializing params...")
-    for i in range(n_burn_in):
-        params, P, R0, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
-        if i % 80 == 0:
-            params_r = np.round(params, 5)
-            print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
-                )
+    # print("initializing params...")
+    # for i in range(n_burn_in):
+    #     params, P, R0, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
+    #     if i % 80 == 0:
+    #         params_r = np.round(params, 5)
+    #         print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
+    #             )
 
     # to show final statistics about params
     saved_params = []
@@ -148,7 +151,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
         params, P, R0, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
         if i >= n_burn_in and i % 100 == 0:
             saved_params.append(params)
-        if i % 80 == 0:
+        if i % 100 == 0:
             params_r = np.round(params+[log_prob_new, log_prob_old, log_prob_new-log_prob_old, params[0]/params[3], sum(R0[-14:-7])], 5)
             print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
                 + f"log prob new:{params_r[4]}  log prob old:{params_r[5]}  diff:{params_r[6]}"
@@ -225,7 +228,7 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon
 
     s0, e0, i0 = inits
     data = [S, E]
-    B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, conditions_fn)
+    B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=30)
     return [B] + data + [log_prob_new, log_prob_old]
 
 
@@ -406,16 +409,14 @@ def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
 
 
 if __name__ == '__main__':
-
-    
-    N = 5000
-    t_end = 190
+    N = 5364500
+    t_end = 100
     inits = [N, 1, 0]
     priors = [(2, 10)]*4
-    rand_walk_stds = [0.05, 0.05, 0.05, 0.05]
+    rand_walk_stds = [0.005, 0.005, 0.005, 0.005]
     t_ctrl = 130
     tau = 1000
-    n_iter = 20000
-    n_burn_in = 5000
-    m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
+    n_iter = 100000
+    n_burn_in = 10000
+    m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.3, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     print(train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:])
