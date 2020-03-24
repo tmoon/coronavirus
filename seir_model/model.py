@@ -118,6 +118,25 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     # P is a list of binomial parameters
     assert (1 >= P).all() and (P >= 0).all()
 
+    # initialize B and params
+    print(f"n_burn_in:{n_burn_in}")
+    print("initializing B...")
+    for i in range(n_burn_in):
+        B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
+        assert sum(B) == m
+        if i % 200 == 0:
+            params_r = np.round(params, 5)
+            print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
+                )
+
+    print("initializing params...")
+    for i in range(n_burn_in):
+        params, P, R0, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
+        if i % 80 == 0:
+            params_r = np.round(params, 5)
+            print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
+                )
+
     # to show final statistics about params
     saved_params = []
     for i in range(n_iter):
@@ -262,19 +281,13 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         """
         see docstring for previous function
         """
-        # sigma = other_data['sigma_' + str(other_data['which_param'])]
         n_tries = 0
-        x_new = np.copy(x)
         while n_tries < 1000:
             n_tries += 1
             x_new = np.random.normal(x, rand_walk_stds)
-            # params_new = params[:]
-            # params_new[other_data['which_param']] = x_new
             if conditions_fn(x_new, data):
                 return x_new, data
-            else:
-                x_new[3] = x[3]
-        print("sample not found")
+        # print("sample not found")
         return x, data
     
     def conditions_fn(x, data):
@@ -385,7 +398,7 @@ def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
 
         # print(t, B[t], C[t], D[t], E[t], I[t], P[t])
     if sum(B) > 20:
-        print(f"sample size:{t}")
+        print(f"number of observations:{t}")
         return sum(B), np.array(C), np.array(D)
     else:
         return create_dataset(inits, beta, q, g, gamma, t_ctrl, tau)
@@ -399,10 +412,10 @@ if __name__ == '__main__':
     t_end = 190
     inits = [N, 1, 0]
     priors = [(2, 10)]*4
-    rand_walk_stds = [0.1, 0.1, 0.1, 0.1]
+    rand_walk_stds = [0.05, 0.05, 0.05, 0.05]
     t_ctrl = 130
     tau = 1000
     n_iter = 20000
-    n_burn_in = 10000
+    n_burn_in = 5000
     m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     print(train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:])
