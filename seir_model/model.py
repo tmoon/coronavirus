@@ -115,17 +115,19 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     print(f"n_burn_in:{n_burn_in}")
     # to show final statistics about params
     saved_params = []
+    saved_R0ts = []
     for i in range(n_iter):
         # MCMC update for B, S, E
         B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
         assert sum(B) == m
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
-        params, P, R0, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
+        params, P, R0t, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
         if i >= n_burn_in and i % 100 == 0:
             saved_params.append(params)
-        if i % 100 == 0:
-            params_r = np.round(params+[log_prob_new, log_prob_old, log_prob_new-log_prob_old, params[0]/params[3], sum(R0[-14:-7])], 5)
+            saved_R0ts.append(R0t)
+        if i % 80 == 0:
+            params_r = np.round(params+[log_prob_new, log_prob_old, log_prob_new-log_prob_old, params[0]/params[3]], 5)
             print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
                 + f"log prob new:{params_r[4]}  log prob old:{params_r[5]}  diff:{params_r[6]}"
                 # + f"log prob diff:{params_r[6]}"
@@ -135,7 +137,16 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
             pass
             # print(f"best B so far:\n{B}")
 
-    return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0)
+    R0s = [p[0]/p[3] for p in saved_params]
+    R0_low = np.mean(R0s)-1.96*np.std(R0s)
+    R0_high = np.mean(R0s)+1.96*np.std(R0s)
+
+    R0ts_mean = np.mean(saved_R0ts, axis=0)
+    R0ts_std = np.std(saved_R0ts, axis=0)
+    R0ts_low = R0ts_mean-1.96*R0ts_std
+    R0ts_high = R0ts_mean+1.96*R0ts_std
+
+    return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_low, R0ts_high)
 
 
 def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon):
@@ -267,19 +278,8 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         """
         return (x > 0).all()
 
-    # initialize other_data
-    # other_data = {}
-    # for i in range(len(params)):
-    #     other_data['gamma_'+str(i)] = prior_params[i]
-    #     other_data['sigma_'+str(i)] = rand_walk_stds[i]
-
-    # params_new = []
-    # for i in range(len(params)):
-    #     other_data['which_param'] = i
-    #     param, _, _, _ = metropolis_hastings(params[i], [params, other_data], fn, proposal, conditions_fn)
-    #     params_new.append(param)
-    params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
     
+    params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
     t_rate = transmission_rate(params_new[0], params_new[1], t_ctrl, t_end)
     return params_new.tolist(), compute_P(t_rate, I, N), t_rate/params_new[3], log_prob_new, log_prob_old
 
@@ -317,6 +317,8 @@ def transmission_rate(beta, q, t_ctrl, t_end):
     rate of transmission on day t, ie. the number of
     newly infected individuals on day t.
     
+    This is defined to be beta prior to t_ctrl and beta*exp(-q(t-t_ctrl)) after t_ctrl
+
     Note: this is different from R0
     """
     trans_rate = np.ones((t_end, )) * beta
@@ -324,13 +326,17 @@ def transmission_rate(beta, q, t_ctrl, t_end):
         ctrl_indices = np.array(range(t_ctrl, t_end))
         trans_rate[ctrl_indices] = beta* np.exp(-q*(ctrl_indices-t_ctrl))
 
-    # try: assert trans_rate.all() >= 0
+    assert trans_rate.all() >= 0
     # except AssertionError as e:
     #     print(beta, q, trans_rate[trans_rate < 0])
     #     raise e
     return trans_rate
 
 def compute_P(trans_rate, I, N):
+    """
+    P[t] = 1 - exp(-BETA[t] * I[t] / N)
+    here BETA[t] = time dependent transmission rate
+    """
     try:
         return 1 - np.exp(-trans_rate * I/N)
     except:
@@ -381,10 +387,14 @@ if __name__ == '__main__':
     t_end = 100
     inits = [N, 1, 0]
     priors = [(2, 10)]*4
-    rand_walk_stds = [0.005, 0.005, 0.005, 0.005]
+    rand_walk_stds = [0.01, 0.01, 0.01, 0.01]
     t_ctrl = 130
     tau = 1000
-    n_iter = 100000
-    n_burn_in = 10000
-    m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.3, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
-    print(train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:])
+    n_iter = 30000
+    n_burn_in = 3000
+    m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
+    params_mean, params_std, R0_conf, R0ts_conf = train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:]
+    print(f"parameters (beta, q, g, gamma): mean: {params_mean}, std={params_std}\n\n"
+          +f"R0 95% confidence interval: {R0_conf}\n\n"
+          +f"R0[t] 95% confidence interval: {R0ts_conf}"
+        )
