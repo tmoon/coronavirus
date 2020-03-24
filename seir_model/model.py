@@ -10,13 +10,6 @@ predictions.
 
 I generated a dummy dataset that was in paper section 3.3. I set 
 N=s0=500 instead of 5364500 for speed. see __name__ == __main__:
-
-The model should be able to estimate the parameters, but it's stuck in 
-the sampling step for unobserved variable B.
-
-main issue: the MCMC in update_data() is not initializing to
-            any non-zero value.
-
 """
 
 
@@ -99,9 +92,6 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
 
     # initialize model parameters
     params = [1, 1, 1, 1]
-    # params[0] = 0.2
-    # params[1] = 0.2
-    # params[2] = 0.2
     beta, q, g, gamma = params
     s0, e0, i0 = inits
     epsilon = 1e-16
@@ -123,23 +113,6 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
 
     # initialize B and params
     print(f"n_burn_in:{n_burn_in}")
-    # print("initializing B...")
-    # for i in range(n_burn_in):
-    #     B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
-    #     assert sum(B) == m
-    #     if i % 200 == 0:
-    #         params_r = np.round(params, 5)
-    #         print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
-    #             )
-
-    # print("initializing params...")
-    # for i in range(n_burn_in):
-    #     params, P, R0, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
-    #     if i % 80 == 0:
-    #         params_r = np.round(params, 5)
-    #         print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
-    #             )
-
     # to show final statistics about params
     saved_params = []
     for i in range(n_iter):
@@ -214,9 +187,9 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon
             if conditions_fn(x_new, [S_new, E_new]):
                 # assert (S_new >= x_new).all()
                 # assert(x_new >= 0).all()
-                # print("found new B")
                 return x_new, [S_new, E_new]
             else:
+                # revert back the changes
                 x_new[t_new] += 1
                 x_new[t_tilde] -= 1
         # assert (E >= 0).all() and (E+I > 0).all()
@@ -252,17 +225,12 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         """
         beta, q, g, gamma = x
         
-        # N, t_ctrl, t_end = other_data['N'], other_data['t_ctrl'], other_data['t_end']
-        # B, C, D = other_data['B'], other_data['C'], other_data['D']
-        # I, S, E = other_data['I'], other_data['S'], other_data['E']
-
         pC = 1-np.exp(-g)
         pR = 1-np.exp(-gamma)
         P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I, N)
 
         # log likelihood
-        # add epsilon to prevent log 0.
-
+        # add epsilon to avoid log 0.
         logB = np.sum(np.log(sp.stats.binom(S, P).pmf(B)+epsilon))
         logC = np.sum(np.log(sp.stats.binom(E, pC).pmf(C)+epsilon))
         logD = np.sum(np.log(sp.stats.binom(I, pR).pmf(D)+epsilon))
