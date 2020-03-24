@@ -395,14 +395,14 @@ def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
 if __name__ == '__main__':
 
     
-    N = 500
-    t_end = 100
-    inits = [800, 1, 0]
-    priors = [(20, 40)]*4
-    rand_walk_stds = [0.001, 0.001, 0.001, .001]
-    t_ctrl = 170
+    N = 5000
+    t_end = 190
+    inits = [N, 1, 0]
+    priors = [(2, 10)]*4
+    rand_walk_stds = [0.1, 0.1, 0.1, 0.1]
+    t_ctrl = 130
     tau = 1000
-    n_iter = 80000
-    n_burn_in = 60000
+    n_iter = 20000
+    n_burn_in = 10000
     m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     print(train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:])
