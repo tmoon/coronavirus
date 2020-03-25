@@ -1,5 +1,6 @@
 import numpy as np 
 import scipy as sp
+import pandas as pd
 from scipy import stats, optimize, interpolate
 import matplotlib.pyplot as plt
 
@@ -106,6 +107,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     # I, S, E should be non-negative
     assert (I >= 0).all()    
     assert (S >= 0).all()
+    print(E)
     assert (E >= 0).all()
     assert (E+I > 0).all()
     # P is a list of binomial parameters
@@ -381,18 +383,43 @@ def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
         return create_dataset(inits, beta, q, g, gamma, t_ctrl, tau)
 
 
+def read_dataset(filepath):
+    def moving_average(a, n=3) :
+        ret = np.cumsum(a, dtype=int)
+        ret[n:] = ret[n:] - ret[:-n]
+        return ret[n - 1:] // n
+    
+    df = pd.read_csv(filepath)
+    C = moving_average(df.num_confirmed_that_day[1:].to_numpy())
+    D = moving_average(df.num_death_that_day[1:].to_numpy()+df.num_recovered_that_day[1:].to_numpy())
+
+    return C, D
 
 if __name__ == '__main__':
-    N = 5364500
-    t_end = 100
-    inits = [N, 1, 0]
+    # N = 5364500
+    # t_end = 100
+    # inits = [N, 1, 0]
+    # priors = [(2, 10)]*4
+    # rand_walk_stds = [0.01, 0.01, 0.01, 0.01]
+    # t_ctrl = 130
+    # tau = 1000
+    # n_iter = 30000
+    # n_burn_in = 3000
+    # m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
+    
+    N = 51.57*10**6
+    inits = [N, 5, 1]
     priors = [(2, 10)]*4
     rand_walk_stds = [0.01, 0.01, 0.01, 0.01]
-    t_ctrl = 130
+    t_ctrl = 30
     tau = 1000
-    n_iter = 30000
-    n_burn_in = 3000
-    m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
+    n_iter = 20000
+    n_burn_in = 10000
+    C, D = read_dataset('../datasets/korea_mar_24.csv')
+    C[C < 0] = 0
+    D[D < 0] = 0
+    m = sum(C)
+    
     params_mean, params_std, R0_conf, R0ts_conf = train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:]
     print(f"parameters (beta, q, g, gamma): mean: {params_mean}, std={params_std}\n\n"
           +f"R0 95% confidence interval: {R0_conf}\n\n"
