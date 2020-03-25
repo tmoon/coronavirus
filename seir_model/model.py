@@ -400,15 +400,15 @@ def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
         return create_dataset(inits, beta, q, g, gamma, t_ctrl, tau)
 
 
-def read_dataset(filepath):
-    def moving_average(a, n=2) :
+def read_dataset(filepath, n=3):
+    def moving_average(a) :
         ret = np.cumsum(a, dtype=int)
         ret[n:] = ret[n:] - ret[:-n]
         return ret[n - 1:] // n
     
     df = pd.read_csv(filepath)
-    C = moving_average(df.num_confirmed_that_day[1:].to_numpy())
-    D = moving_average(df.num_death_that_day[1:].to_numpy()+df.num_recovered_that_day[1:].to_numpy())
+    C = moving_average(df.num_confirmed_that_day[10:-1].to_numpy())
+    D = moving_average(df.num_death_that_day[10:-1].to_numpy()+df.num_recovered_that_day[10:-1].to_numpy())
 
     return C, D
 
@@ -424,20 +424,22 @@ if __name__ == '__main__':
     # n_burn_in = 3000
     # m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     
-    N = 51.57*10**6
-    inits = [N, 0, 1]
-    priors = [(2, 10)]*4
-    rand_walk_stds = [0.003, 0.003, 0.001, 0.001]
-    t_ctrl = 39
-    tau = 1000
-    n_iter = 25000
-    n_burn_in = 15000
-    C, D = read_dataset('../datasets/korea_mar_24.csv')
-    C[C < 0] = 0
-    D[D < 0] = 0
-    m = N-inits[0]+sum(C)
-    incubation_range = [4, 8]
-    infectious_range = [2, 8]
+    N = 59138*30#51.57*10**3 # population
+    # S(0), E(0), I(0)
+    inits = [N, 0, 2]
+    priors = [(2, 10)]*4 # no need to change
+    rand_walk_stds = [0.005, 0.005, 0.005, 0.005] # no need to change
+    t_ctrl = 36          # day on which control measurements were introduced
+    tau = 1000           # no need to change
+    n_iter = 2500       # no need to change
+    n_burn_in = 1500    # no need to change
+    C, D = read_dataset('../datasets/italy_mar_24.csv', n=3) # k = smoothing factor
+    m = np.sum(C)
+
+
+    incubation_range = [2, 10]
+    infectious_range = [2, 10]
+    
     print(f"1/g = mean incubation period: {incubation_range} days, 1/gamma: mean infectious period: {infectious_range} days")
     params_mean, params_std, R0_conf, R0ts_conf = train(C, D, N, inits, priors, 
         rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, incubation_range, infectious_range)[1:]
@@ -445,3 +447,15 @@ if __name__ == '__main__':
           +f"R0 80% confidence interval: {R0_conf}\n\n"
           +f"R0[t] 80% confidence interval: {R0ts_conf}"
         )
+    low, high = R0ts_conf
+    line1, = plt.plot(range(len(low)), low, marker='o', linestyle='solid', linewidth=2, markersize=6, label='lower bound')
+    line2, = plt.plot(range(len(low)), high, marker='o', linestyle='solid', linewidth=2, markersize=6, label='upper bound')
+ 
+    plt.xlabel('day t', fontsize=12)
+    plt.ylabel('R0_t', fontsize=12)
+     
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+     
+    plt.legend(handles=[line1, line2], fontsize=12)
+    plt.show()
