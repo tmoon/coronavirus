@@ -123,7 +123,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     start_time = time.time()
     t0 = start_time
     t1 = start_time
-    for i in xrange(n_iter):
+    for i in range(n_iter):
         # MCMC update for B, S, E
         B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
 
