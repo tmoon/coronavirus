@@ -2,56 +2,17 @@ import numpy as np
 import scipy as sp
 import pandas as pd
 from scipy import stats, optimize, interpolate
+from scipy.optimize import minimize
 import matplotlib.pyplot as plt
-
+import warnings
 import time
 
-"""
-The model learns its parameters from C and D. see docstring of train()
-These parameters can be used for R0 estimation and for making other 
-predictions.
+from e_step import update_data, compute_S, compute_E
 
-I generated a dummy dataset that was in paper section 3.3. I set 
-N=s0=500 instead of 5364500 for speed. see __name__ == __main__:
-"""
+np.seterr(all='ignore')
+warnings.filterwarnings('ignore')
 
-
-def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1, interval=1, num_samples=1):
-    """
-    get num_samples samples from a distribution p(x) ~ k*fn(x) given proposal
-    distribution proposal(x) with metropolis hastings algorithm
-
-        * the new sample has to satisfy the conditions in conditions_fn
-        * data is a list of additional distribution, variables etc that are
-          required to compute the functions
-        * assumes proposal distribution is symmetric, ie: q(x'|x) = q(x|x')
-        * fn returns log prob. for numeric stability
-
-    returns: num_samples samples from p(x) and corresponding data
-    """
-    sampled_x, sampled_data, sampled_old_log_prob, sampled_new_log_prob = [], [], [], []
-    for i in range(burn_in+interval*num_samples):
-        x_new, data_new = proposal(x, data, conditions_fn)
-        x_old, data_old = x, data
-        if i < burn_in:
-            continue
-        accept_log_prob = min(0, fn(x_new, data_new) - fn(x, data))
-        if np.random.binomial(1, np.exp(accept_log_prob)):
-            x, data = x_new, data_new
-        # else reject the sample
-        
-        # now save one sample out of interval samples
-        if (i-burn_in) % interval == 0:
-            sampled_x.append(x)
-            sampled_data.append(data)
-            sampled_new_log_prob.append(fn(x, data))
-            sampled_old_log_prob.append(fn(x_old, data_old))
-    
-    return sampled_x, sampled_data, sampled_new_log_prob, sampled_old_log_prob
-
-
-
-def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, incubation_range, infectious_range):
+def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, bounds):
     """
     C = the number of cases by date of symptom onset
     D = the number of cases who are removed (dead or recovered)
@@ -140,13 +101,13 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
         # I is fixed by C and D and doesn't need to be updated
         params, P, R0t, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, 
                                             params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon, 
-                                            incubation_range, infectious_range)
+                                            bounds)
 
-        if i >= n_burn_in and i % 100 == 0:
+        if i >= n_burn_in and i % 5 == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
-        if i % 8 == 0:
+        if i % 4 == 0:
             params_r = np.round(params + [log_prob_new, log_prob_old, log_prob_new - log_prob_old, params[0] / params[3]], 5)
             print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
                 + f"log prob new:{params_r[4]}  log prob old:{params_r[5]}  diff:{params_r[6]}"
@@ -155,6 +116,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
                 )
             t1 = time.time()
             print("Iter %d: Time %.2f | Runtime: %.2f" % (i, t1 - start_time, t1 - t0))
+            print(f"B:\n{np.round(B)}")
             t0 = t1
 
     R0s = [p[0] / p[3] for p in saved_params]
@@ -172,82 +134,8 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_low, R0ts_high)
 
 
-def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon):
-    """
-    get a sample from p(B|C, D, params) using metropolis hastings
-    """
-
-    def fn(x, data):
-        """
-        x: a sample from p(B|data)
-        B(t) has distribution Binom(S(t), P(t))
-        returns: log likelihood of p(B|data)
-        """
-        S, E = data
-        # assert (S >= x).all()
-        # assert (x >= 0).all()
-        # add epsilon to prevent log 0.
-        return np.sum(np.log(sp.stats.binom(S, P).pmf(B)+epsilon))
-        
-
-    def proposal(x, data, conditions_fn):
-        """
-        x:  a sample from p(B|.)
-        data = [P, I, S, E], and P doesn't depend on x
-        
-        sampling for B works as follows (according to paper)
-            1. randomly select an index t' such that B[t'] > 0
-            2. set B[t'] -= 1
-            3. randomly select an index t^
-            4. set B[t^] += 1
-            5. compute S and E for this new B
-            6. Verify that E >= 0 (S >= 0 obviously since sum(B) is constant)
-            7. Verify I+E>0
-        The authors suggested to select N*10% indices instead of 1 for faster convergence
-        """
-        S, E = data
-        n_tries = 0
-        x_new = np.copy(x)
-        while n_tries < 1000:
-            n_tries += 1
-            t_new = np.random.choice(np.nonzero(x_new)[0], min(10, len(np.nonzero(x_new)[0])), replace=False)
-            t_tilde = np.random.choice(range(t_end), len(t_new), replace=False)
-            
-            x_new[t_new] -= 1
-            x_new[t_tilde] += 1
-            S_new = compute_S(s0, t_end, x_new)
-            E_new = compute_E(e0, t_end, x_new, C)
-
-            if conditions_fn(x_new, [S_new, E_new]):
-                # assert (S_new >= x_new).all()
-                # assert(x_new >= 0).all()
-                return x_new, [S_new, E_new]
-            else:
-                # revert back the changes
-                x_new[t_new] += 1
-                x_new[t_tilde] -= 1
-        # assert (E >= 0).all() and (E+I > 0).all()
-        return x, [S, E]
-
-    def conditions_fn(x, data):
-        S, E = data
-        return np.sum(x) == m and (E>=0).all() and (E+I>0).all()
-
-    s0, e0, i0 = inits
-    data = [S, E]
-    
-    B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, 
-                                            conditions_fn, burn_in=30, interval=5, num_samples=3)
-    B = np.mean(B, axis=0)
-    data = np.mean(data, axis=0)
-    log_prob_new = np.mean(log_prob_new, axis=0)
-    log_prob_old = np.mean(log_prob_old, axis=0)
-    # print(m, sum(B))
-    return [B] + [data[0], data[1]] + [log_prob_new, log_prob_old]
-
-
 def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_stds,
-                  N, t_end, t_ctrl, epsilon, incubation_range, infectious_range):
+                  N, t_end, t_ctrl, epsilon, bounds):
     """
     update beta, q, g, gamma with independent MCMC sampling
     each of B, C, D is a list of binomial distributions. The prior is a gamma distribution for each parameter 
@@ -256,7 +144,7 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
     are four; one for each param). 
 
     """
-    def fn(x, data):
+    def fn(x):
         """
         here x is equal to one of beta, q, g, gamma. since we compute the same likelihood
         function to update each of the params, it is sufficient to use this generic function
@@ -282,64 +170,21 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         # assert not np.isnan(logD)
 
         # log prior
-        log_prior = 0
-        for i in range(4):
-            a, b = prior_params[i]
-            log_prior += np.log(sp.stats.gamma(a, b).pdf(x[i])+epsilon)
+        # log_prior = 0
+        # for i in range(4):
+        #     a, b = prior_params[i]
+        #     log_prior += np.log(sp.stats.gamma(a, b).pdf(x[i])+epsilon)
         # assert not np.isnan(log_prior)
         
-        return logB + logC + logD + log_prior
-
-    def proposal(x, data, conditions_fn):
-        """
-        see docstring for previous function
-        """
-        n_tries = 0
-        while n_tries < 1000:
-            n_tries += 1
-            x_new = np.random.normal(x, rand_walk_stds)
-            if conditions_fn(x_new, data):
-                return x_new, data
-        # print("sample not found")
-        return x, data
+        return -(logB + logC + logD)
     
-    def conditions_fn(x, data):
-        """
-        all parameters should be non-negative
-        """
-        beta, q, g, gamma = x
-        return (x > 0).all()\
-               and incubation_range[0] <= 1 / g <= incubation_range[1]\
-               and infectious_range[0] <= 1 / gamma <= infectious_range[1]
-
+    log_prob_old = fn(np.array(params))
+    # 'trust-constr'
+    params_new = sp.optimize.minimize(fn, x0=np.array(params), method='SLSQP', bounds=bounds).x
+    log_prob_new = fn(params_new)
     
-    params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
-    
-    params_new = np.mean(params_new, axis=0)
-    log_prob_new = np.mean(log_prob_new, axis=0)
-    log_prob_old = np.mean(log_prob_old, axis=0)
-
     t_rate = transmission_rate(params_new[0], params_new[1], t_ctrl, t_end)
     return params_new.tolist(), compute_P(t_rate, I, N), t_rate / params_new[3], log_prob_new, log_prob_old
-
-def compute_S(s0, t_end, B):
-    """
-    S(0) = s0
-    S(t+1) = S(t) - B(t) for t >= 0
-
-    can be simplified to S(t+1) = s0 - sum(B[:t])
-    """
-    return s0 - np.concatenate(([0], np.cumsum(B)[:-1]))
-
-
-def compute_E(e0, t_end, B, C):
-    """
-    E(0) = e0
-    E(t+1) = E(t) + B(t) - C(t) for t >= 0
-
-    can be simplified to E(t+1) = e0+sum(B[:t]-C[:t])
-    """
-    return e0 + np.concatenate(([0], np.cumsum(B - C)[:-1]))
 
 
 def compute_I(i0, t_end, C, D):
@@ -457,12 +302,14 @@ if __name__ == '__main__':
     m = np.sum(C)
 
 
-    incubation_range = [2, 10]
-    infectious_range = [2, 10]
+    incubation_range = [1/8, 1/4]
+    infectious_range = [1/8, 1/2]
     
-    print(f"1/g = mean incubation period: {incubation_range} days, 1/gamma: mean infectious period: {infectious_range} days")
+    bounds=[[0., 2], [0, 10], incubation_range, infectious_range]
+
+    print(f"1/mean incubation period: {incubation_range} days, 1/mean infectious period: {infectious_range} days")
     params_mean, params_std, R0_conf, R0ts_conf = train(C, D, N, inits, priors, 
-        rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, incubation_range, infectious_range)[1:]
+        rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, bounds)[1:]
     print(f"parameters (beta, q, g, gamma): mean: {params_mean}, std={params_std}\n\n"
           +f"R0 80% confidence interval: {R0_conf}\n\n"
           +f"R0[t] 80% confidence interval: {R0ts_conf}"
