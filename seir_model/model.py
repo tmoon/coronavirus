@@ -410,7 +410,7 @@ if __name__ == '__main__':
     N = 51.57*10**6
     inits = [N, 5, 1]
     priors = [(2, 10)]*4
-    rand_walk_stds = [0.01, 0.01, 0.01, 0.01]
+    rand_walk_stds = [0.008, 0.008, 0.008, 0.008]
     t_ctrl = 30
     tau = 1000
     n_iter = 20000
