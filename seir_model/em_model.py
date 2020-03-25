@@ -116,7 +116,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
                 )
             t1 = time.time()
             print("Iter %d: Time %.2f | Runtime: %.2f" % (i, t1 - start_time, t1 - t0))
-            print(f"B:\n{np.round(B)}")
+            print(f"B:\n{np.round(B).astype(int)}")
             t0 = t1
 
     R0s = [p[0] / p[3] for p in saved_params]
@@ -296,8 +296,8 @@ if __name__ == '__main__':
     rand_walk_stds = [0.003, 0.003, 0.003, 0.003] # no need to change
     t_ctrl = 36          # day on which control measurements were introduced
     tau = 1000           # no need to change
-    n_iter = 2500       # no need to change
-    n_burn_in = 1500    # no need to change
+    n_iter = 1000       # no need to change
+    n_burn_in = 600    # no need to change
     C, D = read_dataset('../datasets/italy_mar_24.csv', n=3) # k = smoothing factor
     m = np.sum(C)
 

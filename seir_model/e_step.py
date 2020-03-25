@@ -54,7 +54,7 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1, interva
     returns: num_samples samples from p(x) and corresponding data
     """
     sampled_x = 0
-    for i in range(burn_in+interval*num_samples):
+    for i in range(burn_in+interval*num_samples+1):
         x_new, data_new = proposal(x, data, conditions_fn)
         accept_log_prob = min(0, fn(x_new, data_new) - fn(x, data))
         if np.random.binomial(1, np.exp(accept_log_prob)):
@@ -132,13 +132,10 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon
     data = [S, E]
     
     log_prob_old = fn(B, data)
-    B = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=1000, interval=5, num_samples=30)
-    B = np.round(B).astype(int)
+    B = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=50000, interval=5, num_samples=40)
+    B = np.floor(B+0.5).astype(int)
     residue = m-np.sum(B)
-    while np.abs(residue) >= len(B):
-        B[:] += np.sign(residue)
-        residue -= len(B)*np.sign(residue)
-    
+    assert np.abs(residue) <= len(B)
     B[:np.abs(residue)] += np.sign(residue)
     data = compute_S(s0, t_end, B), compute_E(e0, t_end, B, C)
     log_prob_new = fn(B, data)
