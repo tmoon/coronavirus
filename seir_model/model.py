@@ -41,7 +41,7 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1):
 
 
 
-def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m):
+def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, incubation_range, infectious_range):
     """
     C = the number of cases by date of symptom onset
     D = the number of cases who are removed (dead or recovered)
@@ -92,7 +92,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     assert np.sum(B) == m
 
     # initialize model parameters
-    params = [1, 1, 1, 1]
+    params = [0.2, 0.2, 0.2, 0.2]
     beta, q, g, gamma = params
     s0, e0, i0 = inits
     epsilon = 1e-16
@@ -107,7 +107,6 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     # I, S, E should be non-negative
     assert (I >= 0).all()    
     assert (S >= 0).all()
-    print(E)
     assert (E >= 0).all()
     assert (E+I > 0).all()
     # P is a list of binomial parameters
@@ -124,7 +123,9 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
         assert sum(B) == m
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
-        params, P, R0t, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon)
+        params, P, R0t, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, 
+                                            params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon, 
+                                            incubation_range, infectious_range)
         if i >= n_burn_in and i % 100 == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
@@ -135,18 +136,15 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
                 # + f"log prob diff:{params_r[6]}"
                 # + f"  R0:{params_r[7]}")#  R0 -2nd week:{params_r[8]}"
                 )
-        if i % 50 == 0:
-            pass
-            # print(f"best B so far:\n{B}")
 
     R0s = [p[0]/p[3] for p in saved_params]
-    R0_low = np.mean(R0s)-1.96*np.std(R0s)
-    R0_high = np.mean(R0s)+1.96*np.std(R0s)
+    R0_low = np.mean(R0s)-1.28*np.std(R0s)
+    R0_high = np.mean(R0s)+1.28*np.std(R0s)
 
     R0ts_mean = np.mean(saved_R0ts, axis=0)
     R0ts_std = np.std(saved_R0ts, axis=0)
-    R0ts_low = R0ts_mean-1.96*R0ts_std
-    R0ts_high = R0ts_mean+1.96*R0ts_std
+    R0ts_low = R0ts_mean-1.28*R0ts_std
+    R0ts_high = R0ts_mean+1.28*R0ts_std
 
     return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_low, R0ts_high)
 
@@ -218,7 +216,8 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon
     return [B] + data + [log_prob_new, log_prob_old]
 
 
-def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_stds, N, t_end, t_ctrl, epsilon):
+def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_stds,
+                  N, t_end, t_ctrl, epsilon, incubation_range, infectious_range):
     """
     update beta, q, g, gamma with independent MCMC sampling
     each of B, C, D is a list of binomial distributions. The prior is a gamma distribution for each parameter 
@@ -278,7 +277,10 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         """
         all parameters should be non-negative
         """
-        return (x > 0).all()
+        beta, q, g, gamma = x
+        return (x > 0).all()\
+               and incubation_range[0] <= 1/g <= incubation_range[1]\
+               and infectious_range[0] <= 1/gamma <= infectious_range[1]
 
     
     params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
@@ -384,7 +386,7 @@ def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
 
 
 def read_dataset(filepath):
-    def moving_average(a, n=3) :
+    def moving_average(a, n=2) :
         ret = np.cumsum(a, dtype=int)
         ret[n:] = ret[n:] - ret[:-n]
         return ret[n - 1:] // n
@@ -408,20 +410,23 @@ if __name__ == '__main__':
     # m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     
     N = 51.57*10**6
-    inits = [N, 5, 1]
+    inits = [N, 0, 1]
     priors = [(2, 10)]*4
-    rand_walk_stds = [0.008, 0.008, 0.008, 0.008]
-    t_ctrl = 30
+    rand_walk_stds = [0.003, 0.003, 0.001, 0.001]
+    t_ctrl = 39
     tau = 1000
-    n_iter = 20000
-    n_burn_in = 10000
+    n_iter = 25000
+    n_burn_in = 15000
     C, D = read_dataset('../datasets/korea_mar_24.csv')
     C[C < 0] = 0
     D[D < 0] = 0
-    m = sum(C)
-    
-    params_mean, params_std, R0_conf, R0ts_conf = train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m)[1:]
+    m = N-inits[0]+sum(C)
+    incubation_range = [4, 8]
+    infectious_range = [2, 8]
+    print(f"1/g = mean incubation period: {incubation_range} days, 1/gamma: mean infectious period: {infectious_range} days")
+    params_mean, params_std, R0_conf, R0ts_conf = train(C, D, N, inits, priors, 
+        rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, incubation_range, infectious_range)[1:]
     print(f"parameters (beta, q, g, gamma): mean: {params_mean}, std={params_std}\n\n"
-          +f"R0 95% confidence interval: {R0_conf}\n\n"
-          +f"R0[t] 95% confidence interval: {R0ts_conf}"
+          +f"R0 80% confidence interval: {R0_conf}\n\n"
+          +f"R0[t] 80% confidence interval: {R0ts_conf}"
         )
