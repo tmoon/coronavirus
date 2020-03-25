@@ -132,7 +132,7 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon
     data = [S, E]
     
     log_prob_old = fn(B, data)
-    B = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=50000, interval=5, num_samples=40)
+    B = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=5000, interval=5, num_samples=40)
     B = np.floor(B+0.5).astype(int)
     residue = m-np.sum(B)
     assert np.abs(residue) <= len(B)
