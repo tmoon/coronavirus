@@ -110,7 +110,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     assert (I >= 0).all()    
     assert (S >= 0).all()
     assert (E >= 0).all()
-    assert (E+I > 0).all()
+    assert (E + I > 0).all()
     # P is a list of binomial parameters
     assert (1 >= P).all() and (P >= 0).all()
 
@@ -123,7 +123,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     start_time = time.time()
     t0 = start_time
     t1 = start_time
-    for i in range(n_iter):
+    for i in xrange(n_iter):
         # MCMC update for B, S, E
         B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
 
@@ -137,8 +137,9 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
         if i >= n_burn_in and i % 100 == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
+
         if i % 80 == 0:
-            params_r = np.round(params+[log_prob_new, log_prob_old, log_prob_new-log_prob_old, params[0]/params[3]], 5)
+            params_r = np.round(params + [log_prob_new, log_prob_old, log_prob_new - log_prob_old, params[0] / params[3]], 5)
             print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
                 + f"log prob new:{params_r[4]}  log prob old:{params_r[5]}  diff:{params_r[6]}"
                 # + f"log prob diff:{params_r[6]}"
@@ -148,14 +149,17 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
             print("Iter %d: Time %.2f | Runtime: %.2f" % (i, t1 - start_time, t1 - t0))
             t0 = t1
 
-    R0s = [p[0]/p[3] for p in saved_params]
-    R0_low = np.mean(R0s)-1.28*np.std(R0s)
-    R0_high = np.mean(R0s)+1.28*np.std(R0s)
+    R0s = [p[0] / p[3] for p in saved_params]
+
+    # 80% CI
+    CI_FACTOR = 1.28
+    R0_low = np.mean(R0s) - CI_FACTOR * np.std(R0s)
+    R0_high = np.mean(R0s) + CI_FACTOR * np.std(R0s)
 
     R0ts_mean = np.mean(saved_R0ts, axis=0)
     R0ts_std = np.std(saved_R0ts, axis=0)
-    R0ts_low = R0ts_mean-1.28*R0ts_std
-    R0ts_high = R0ts_mean+1.28*R0ts_std
+    R0ts_low = R0ts_mean - CI_FACTOR * R0ts_std
+    R0ts_high = R0ts_mean + CI_FACTOR * R0ts_std
 
     return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_low, R0ts_high)
 
