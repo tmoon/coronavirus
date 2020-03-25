@@ -4,6 +4,8 @@ import pandas as pd
 from scipy import stats, optimize, interpolate
 import matplotlib.pyplot as plt
 
+import time
+
 """
 The model learns its parameters from C and D. see docstring of train()
 These parameters can be used for R0 estimation and for making other 
@@ -31,7 +33,7 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1):
     while burn_in:
         burn_in -= 1
         x_new, data_new = proposal(x, data, conditions_fn)
-        accept_log_prob = min(0, fn(x_new, data_new)-fn(x, data))
+        accept_log_prob = min(0, fn(x_new, data_new) - fn(x, data))
         if np.random.binomial(1, np.exp(accept_log_prob)):
             # if accept_log_prob < 0: print("accepted new state")
             x, data = x_new, data_new #, fn(x_new, data_new), fn(x, data)
@@ -117,15 +119,21 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     # to show final statistics about params
     saved_params = []
     saved_R0ts = []
+
+    start_time = time.time()
+    t0 = start_time
+    t1 = start_time
     for i in range(n_iter):
         # MCMC update for B, S, E
         B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
-        assert sum(B) == m
+
+        assert np.sum(B) == m
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
         params, P, R0t, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, 
                                             params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon, 
                                             incubation_range, infectious_range)
+
         if i >= n_burn_in and i % 100 == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
@@ -136,6 +144,9 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
                 # + f"log prob diff:{params_r[6]}"
                 # + f"  R0:{params_r[7]}")#  R0 -2nd week:{params_r[8]}"
                 )
+            t1 = time.time()
+            print("Iter %d: Time %.2f | Runtime: %.2f" % (i, t1 - start_time, t1 - t0))
+            t0 = t1
 
     R0s = [p[0]/p[3] for p in saved_params]
     R0_low = np.mean(R0s)-1.28*np.std(R0s)
@@ -208,7 +219,7 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon
 
     def conditions_fn(x, data):
         S, E = data
-        return sum(x) == m and (E>=0).all() and (E+I>0).all()
+        return np.sum(x) == m and (E>=0).all() and (E+I>0).all()
 
     s0, e0, i0 = inits
     data = [S, E]
@@ -237,15 +248,15 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         """
         beta, q, g, gamma = x
         
-        pC = 1-np.exp(-g)
-        pR = 1-np.exp(-gamma)
+        pC = 1 - np.exp(-g)
+        pR = 1 - np.exp(-gamma)
         P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I, N)
 
         # log likelihood
         # add epsilon to avoid log 0.
-        logB = np.sum(np.log(sp.stats.binom(S, P).pmf(B)+epsilon))
-        logC = np.sum(np.log(sp.stats.binom(E, pC).pmf(C)+epsilon))
-        logD = np.sum(np.log(sp.stats.binom(I, pR).pmf(D)+epsilon))
+        logB = np.sum(np.log(sp.stats.binom(S, P).pmf(B) + epsilon))
+        logC = np.sum(np.log(sp.stats.binom(E, pC).pmf(C) + epsilon))
+        logD = np.sum(np.log(sp.stats.binom(I, pR).pmf(D) + epsilon))
 
         # assert not np.isnan(logB)
         # assert not np.isnan(logC)
@@ -258,7 +269,7 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
             log_prior += np.log(sp.stats.gamma(a, b).pdf(x[i])+epsilon)
         # assert not np.isnan(log_prior)
         
-        return logB+logC+logD+log_prior
+        return logB + logC + logD + log_prior
 
     def proposal(x, data, conditions_fn):
         """
@@ -279,13 +290,13 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         """
         beta, q, g, gamma = x
         return (x > 0).all()\
-               and incubation_range[0] <= 1/g <= incubation_range[1]\
-               and infectious_range[0] <= 1/gamma <= infectious_range[1]
+               and incubation_range[0] <= 1 / g <= incubation_range[1]\
+               and infectious_range[0] <= 1 / gamma <= infectious_range[1]
 
     
     params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
     t_rate = transmission_rate(params_new[0], params_new[1], t_ctrl, t_end)
-    return params_new.tolist(), compute_P(t_rate, I, N), t_rate/params_new[3], log_prob_new, log_prob_old
+    return params_new.tolist(), compute_P(t_rate, I, N), t_rate / params_new[3], log_prob_new, log_prob_old
 
 def compute_S(s0, t_end, B):
     """
@@ -304,7 +315,7 @@ def compute_E(e0, t_end, B, C):
 
     can be simplified to E(t+1) = e0+sum(B[:t]-C[:t])
     """
-    return e0 + np.concatenate(([0], np.cumsum(B-C)[:-1]))
+    return e0 + np.concatenate(([0], np.cumsum(B - C)[:-1]))
 
 
 def compute_I(i0, t_end, C, D):
@@ -314,7 +325,7 @@ def compute_I(i0, t_end, C, D):
 
     can be simplified to I(t+1) = i0+sum(C[:t]-D[:t])
     """
-    return i0 + np.concatenate(([0], np.cumsum(C-D)[:-1]))
+    return i0 + np.concatenate(([0], np.cumsum(C - D)[:-1]))
 
 def transmission_rate(beta, q, t_ctrl, t_end):
     """
@@ -328,7 +339,7 @@ def transmission_rate(beta, q, t_ctrl, t_end):
     trans_rate = np.ones((t_end, )) * beta
     if t_ctrl < t_end:
         ctrl_indices = np.array(range(t_ctrl, t_end))
-        trans_rate[ctrl_indices] = beta* np.exp(-q*(ctrl_indices-t_ctrl))
+        trans_rate[ctrl_indices] = beta * np.exp(-q * (ctrl_indices - t_ctrl))
 
     assert trans_rate.all() >= 0
     # except AssertionError as e:
@@ -342,7 +353,7 @@ def compute_P(trans_rate, I, N):
     here BETA[t] = time dependent transmission rate
     """
     try:
-        return 1 - np.exp(-trans_rate * I/N)
+        return 1 - np.exp(-trans_rate * I / N)
     except:
         print(trans_rate, I)
         raise ValueError
@@ -359,7 +370,7 @@ def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
     C = []
     D = []
     P = []
-    t_rate = transmission_rate(beta, q, t_ctrl, tau-1)
+    t_rate = transmission_rate(beta, q, t_ctrl, tau - 1)
     
     t = 0
     while t < tau - 1 and I[t] + E[t] > 0:
@@ -378,9 +389,9 @@ def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
         t += 1
 
         # print(t, B[t], C[t], D[t], E[t], I[t], P[t])
-    if sum(B) > 20:
+    if np.sum(B) > 20:
         print(f"number of observations:{t}")
-        return sum(B), np.array(C), np.array(D)
+        return np.sum(B), np.array(C), np.array(D)
     else:
         return create_dataset(inits, beta, q, g, gamma, t_ctrl, tau)
 
