@@ -16,9 +16,9 @@ N=s0=500 instead of 5364500 for speed. see __name__ == __main__:
 """
 
 
-def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1):
+def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1, interval=1, num_samples=1):
     """
-    get 1 sample from a distribution p(x) ~ k*fn(x) given proposal
+    get num_samples samples from a distribution p(x) ~ k*fn(x) given proposal
     distribution proposal(x) with metropolis hastings algorithm
 
         * the new sample has to satisfy the conditions in conditions_fn
@@ -27,19 +27,27 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1):
         * assumes proposal distribution is symmetric, ie: q(x'|x) = q(x|x')
         * fn returns log prob. for numeric stability
 
-    returns: one sample from p(x) and corresponding data
+    returns: num_samples samples from p(x) and corresponding data
     """
-    old_log_prob = fn(x, data)
-    while burn_in:
-        burn_in -= 1
+    sampled_x, sampled_data, sampled_old_log_prob, sampled_new_log_prob = [], [], [], []
+    for i in range(burn_in+interval*num_samples):
         x_new, data_new = proposal(x, data, conditions_fn)
+        x_old, data_old = x, data
+        if i < burn_in:
+            continue
         accept_log_prob = min(0, fn(x_new, data_new) - fn(x, data))
         if np.random.binomial(1, np.exp(accept_log_prob)):
-            # if accept_log_prob < 0: print("accepted new state")
-            x, data = x_new, data_new #, fn(x_new, data_new), fn(x, data)
-        else:
-            pass
-    return x, data, fn(x, data), old_log_prob
+            x, data = x_new, data_new
+        # else reject the sample
+        
+        # now save one sample out of interval samples
+        if (i-burn_in) % interval == 0:
+            sampled_x.append(x)
+            sampled_data.append(data)
+            sampled_new_log_prob.append(fn(x, data))
+            sampled_old_log_prob.append(fn(x_old, data_old))
+    
+    return sampled_x, sampled_data, sampled_new_log_prob, sampled_old_log_prob
 
 
 
@@ -127,7 +135,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
         # MCMC update for B, S, E
         B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
 
-        assert np.sum(B) == m
+        assert np.round(np.sum(B)) == m
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
         params, P, R0t, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, 
@@ -138,7 +146,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
-        if i % 80 == 0:
+        if i % 8 == 0:
             params_r = np.round(params + [log_prob_new, log_prob_old, log_prob_new - log_prob_old, params[0] / params[3]], 5)
             print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
                 + f"log prob new:{params_r[4]}  log prob old:{params_r[5]}  diff:{params_r[6]}"
@@ -227,8 +235,15 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon
 
     s0, e0, i0 = inits
     data = [S, E]
-    B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=30)
-    return [B] + data + [log_prob_new, log_prob_old]
+    
+    B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, 
+                                            conditions_fn, burn_in=30, interval=5, num_samples=3)
+    B = np.mean(B, axis=0)
+    data = np.mean(data, axis=0)
+    log_prob_new = np.mean(log_prob_new, axis=0)
+    log_prob_old = np.mean(log_prob_old, axis=0)
+    # print(m, sum(B))
+    return [B] + [data[0], data[1]] + [log_prob_new, log_prob_old]
 
 
 def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_stds,
@@ -299,6 +314,11 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
 
     
     params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
+    
+    params_new = np.mean(params_new, axis=0)
+    log_prob_new = np.mean(log_prob_new, axis=0)
+    log_prob_old = np.mean(log_prob_old, axis=0)
+
     t_rate = transmission_rate(params_new[0], params_new[1], t_ctrl, t_end)
     return params_new.tolist(), compute_P(t_rate, I, N), t_rate / params_new[3], log_prob_new, log_prob_old
 
@@ -424,11 +444,11 @@ if __name__ == '__main__':
     # n_burn_in = 3000
     # m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     
-    N = 59138*30#51.57*10**3 # population
+    N = 60550075#51.57*10**3 # population
     # S(0), E(0), I(0)
     inits = [N, 0, 2]
     priors = [(2, 10)]*4 # no need to change
-    rand_walk_stds = [0.005, 0.005, 0.005, 0.005] # no need to change
+    rand_walk_stds = [0.003, 0.003, 0.003, 0.003] # no need to change
     t_ctrl = 36          # day on which control measurements were introduced
     tau = 1000           # no need to change
     n_iter = 2500       # no need to change
