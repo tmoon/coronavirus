@@ -43,7 +43,7 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1):
 
 
 
-def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, incubation_range, infectious_range):
+def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds):
     """
     C = the number of cases by date of symptom onset
     D = the number of cases who are removed (dead or recovered)
@@ -81,36 +81,30 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     returns: the distribution of B and params. They can be used later to calculate R0 and extrapolate
 
     """
-    t_end = len(C)
+    t_end = len(N)
     assert t_end < tau
     assert t_ctrl < tau
-    assert len(C) == len(D)
-    assert inits[0] >= m # s0 >= m
+    assert len(N) == len(D_wild)
     assert n_burn_in < n_iter
 
-    # initialize
-    B = np.zeros((t_end,))
-    B[0] = m
-    assert np.sum(B) == m
-
     # initialize model parameters
-    params = [0.2, 0.2, 0.2, 0.2]
-    beta, q, g, gamma = params
-    s0, e0, i0 = inits
+    s0, e0, i_mild0, i_wild0 = inits
+    beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
+    print("Initializating Variables...")
+    S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, P, t_rate = initialize(inits, params, N, D_wild, t_ctrl)
     epsilon = 1e-16
-    
+    print("Initialization Complete.")
     # initialize I, S, E, P
-    I = compute_I(inits[2], t_end, C, D)
-    S = compute_S(s0, t_end, B)
-    E = compute_E(e0, t_end, B, C)
-    P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I, N)
-    
-    # rep invariants
-    # I, S, E should be non-negative
-    assert (I >= 0).all()    
+    assert (I_mild >= 0).all()    
+    assert (I_wild >= 0).all()    
     assert (S >= 0).all()
     assert (E >= 0).all()
-    assert (E + I > 0).all()
+    assert (E + I_mild + I_wild > 0).all()
+    assert (B >= 0).all()
+    assert (C_mild >= 0).all()
+    assert (C_wild >= 0).all()
+    assert (D_mild >= 0).all()
+    assert (D_wild >= 0).all()
     # P is a list of binomial parameters
     assert (1 >= P).all() and (P >= 0).all()
 
@@ -125,28 +119,31 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     t1 = start_time
     for i in range(n_iter):
         # MCMC update for B, S, E
-        B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
+        B, S, E, log_prob_new, log_prob_old = sample_B(B, [P, S, E, I_mild, I_wild, N, C_mild, C_wild], inits, params, t_ctrl, epsilon)
+        C_mild, C_wild, E, I_mild, I_wild, _, _ = sample_C(C_mild, C_wild, [E, I_mild, I_wild, D_mild, D_wild], 
+                                                           inits, params, t_ctrl, epsilon)
+        D_mild, I_mild, I_wild, _, _ = sample_D_mild(D_mild, [E, I_mild, I_wild, C_mild], inits, params, t_ctrl, epsilon)
 
-        assert np.sum(B) == m
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
-        params, P, R0t, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, 
-                                            params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon, 
-                                            incubation_range, infectious_range)
+        params, P, R0t, log_prob_new, log_prob_old = sample_params(params, [S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P, N], 
+                                                                    inits, priors, rand_walk_stds, t_ctrl, epsilon, bounds
+                                                                   )
 
-        if i >= n_burn_in and i % 100 == 0:
+        if i >= n_burn_in and i % 10 == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
-        if i % 80 == 0:
-            params_r = np.round(params + [log_prob_new, log_prob_old, log_prob_new - log_prob_old, params[0] / params[3]], 5)
-            print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
-                + f"log prob new:{params_r[4]}  log prob old:{params_r[5]}  diff:{params_r[6]}"
-                # + f"log prob diff:{params_r[6]}"
-                # + f"  R0:{params_r[7]}")#  R0 -2nd week:{params_r[8]}"
-                )
+        if i % 2 == 0:
+            beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
+            params_dict = {'beta': beta, 'q': q, 'g_mild': g_mild, 'g_wild':g_wild, 
+                           'gamma_mild':gamma_mild, 'gamma_wild':gamma_wild, 'k': k,
+                           'log_prob_new':log_prob_new, 'diff':log_prob_new-log_prob_old, 
+                           }
+            print(f"iter. {i}=> {params_dict}")
             t1 = time.time()
             print("Iter %d: Time %.2f | Runtime: %.2f" % (i, t1 - start_time, t1 - t0))
+            print(f"B:\n{B}")
             t0 = t1
 
     R0s = [p[0] / p[3] for p in saved_params]
@@ -164,75 +161,184 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_low, R0ts_high)
 
 
-def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon):
+def sample_x(x, data, conditions_fn, data_fn):
+    """
+    x:  a sample from p(B|.)
+    data = [P, I, S, E], and P doesn't depend on x
+    
+    sampling for B works as follows (according to paper)
+        1. randomly select an index t' such that B[t'] > 0
+        2. set B[t'] -= 1
+        3. randomly select an index t^
+        4. set B[t^] += 1
+        5. compute S and E for this new B
+        6. Verify that E >= 0 (S >= 0 obviously since sum(B) is constant)
+        7. Verify I+E>0
+    The authors suggested to select N*10% indices instead of 1 for faster convergence
+    """
+    n_tries = 0
+    x_new = np.copy(x)
+    while n_tries < 1000:
+        n_tries += 1
+        t_new = np.random.choice(np.nonzero(x_new)[0], min(20, len(np.nonzero(x_new)[0])), replace=False)
+        t_tilde = np.random.choice(range(len(x)), len(t_new), replace=False)
+        
+        x_new[t_new] -= 1
+        x_new[t_tilde] += 1
+        data_new = data_fn(x_new)
+
+        if conditions_fn(x_new, data_new):
+            # assert (S_new >= x_new).all()
+            # assert(x_new >= 0).all()
+            return x_new, data_new
+        else:
+            # revert back the changes
+            x_new[t_new] += 1
+            x_new[t_tilde] -= 1
+    # assert (E >= 0).all() and (E+I > 0).all()
+    return x, data
+
+
+def sample_B(B, variables, inits, params, t_ctrl, epsilon):
     """
     get a sample from p(B|C, D, params) using metropolis hastings
     """
 
     def fn(x, data):
-        """
-        x: a sample from p(B|data)
-        B(t) has distribution Binom(S(t), P(t))
-        returns: log likelihood of p(B|data)
-        """
         S, E = data
         # assert (S >= x).all()
         # assert (x >= 0).all()
         # add epsilon to prevent log 0.
-        return np.sum(np.log(sp.stats.binom(S, P).pmf(B)+epsilon))
+        return np.sum(np.log(sp.stats.binom(S, P).pmf(x)+epsilon))
         
 
     def proposal(x, data, conditions_fn):
-        """
-        x:  a sample from p(B|.)
-        data = [P, I, S, E], and P doesn't depend on x
-        
-        sampling for B works as follows (according to paper)
-            1. randomly select an index t' such that B[t'] > 0
-            2. set B[t'] -= 1
-            3. randomly select an index t^
-            4. set B[t^] += 1
-            5. compute S and E for this new B
-            6. Verify that E >= 0 (S >= 0 obviously since sum(B) is constant)
-            7. Verify I+E>0
-        The authors suggested to select N*10% indices instead of 1 for faster convergence
-        """
         S, E = data
-        n_tries = 0
-        x_new = np.copy(x)
-        while n_tries < 1000:
-            n_tries += 1
-            t_new = np.random.choice(np.nonzero(x_new)[0], min(10, len(np.nonzero(x_new)[0])), replace=False)
-            t_tilde = np.random.choice(range(t_end), len(t_new), replace=False)
-            
-            x_new[t_new] -= 1
-            x_new[t_tilde] += 1
-            S_new = compute_S(s0, t_end, x_new)
-            E_new = compute_E(e0, t_end, x_new, C)
+        def data_fn(x):
+            S_new = compute_S(s0, x, N)
+            E_new = compute_E(e0, x, C_mild, C_wild)
+            return S_new, E_new
 
-            if conditions_fn(x_new, [S_new, E_new]):
-                # assert (S_new >= x_new).all()
-                # assert(x_new >= 0).all()
-                return x_new, [S_new, E_new]
-            else:
-                # revert back the changes
-                x_new[t_new] += 1
-                x_new[t_tilde] -= 1
-        # assert (E >= 0).all() and (E+I > 0).all()
-        return x, [S, E]
+        return sample_x(x, data, conditions_fn, data_fn)
 
     def conditions_fn(x, data):
         S, E = data
-        return np.sum(x) == m and (E>=0).all() and (E+I>0).all()
+        return np.sum(x) == sum_B and (E>=0).all() and (E+I_mild+I_wild>0).all()
 
-    s0, e0, i0 = inits
+    s0, e0, i_mild0, i_wild0 = inits
+    P, S, E, I_mild, I_wild, N, C_mild, C_wild = variables
     data = [S, E]
+    sum_B = np.sum(B)
     B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=30)
     return [B] + data + [log_prob_new, log_prob_old]
 
 
-def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_stds,
-                  N, t_end, t_ctrl, epsilon, incubation_range, infectious_range):
+def sample_C(C_mild, C_wild, variables, inits, params, t_ctrl, epsilon):
+    """
+    get a sample from p(B|C, D, params) using metropolis hastings
+    """
+
+    def fn_mild(x, data):
+        E, I_mild = data
+        # add epsilon to prevent log 0.
+        pC = 1-np.exp(-g_mild)
+        assert 0 <= pC <= 1
+        assert not np.isnan(pC)
+        return np.sum(np.log(sp.stats.binom(E, pC).pmf(x)+epsilon))
+
+    def fn_wild(x, data):
+        E, I_wild = data
+        # add epsilon to prevent log 0.
+        pC = 1-np.exp(-g_wild)
+        assert 0 <= pC <= 1
+        assert not np.isnan(pC)
+        return np.sum(np.log(sp.stats.binom(E, pC).pmf(x)+epsilon))
+        
+
+    def proposal_mild(x, data, conditions_fn):
+        E, I_mild = data
+        def data_fn(x):
+            E_new = compute_E(e0, B, x, C_wild)
+            I_mild_new = compute_I(i_mild0, x, D_mild)
+            return E_new, I_mild_new
+        return sample_x(x, data, conditions_fn, data_fn)
+
+
+    def proposal_wild(x, data, conditions_fn):
+        E, I_wild = data
+        def data_fn(x):
+            E_new = compute_E(e0, B, C_mild, x)
+            I_wild_new = compute_I(i_wild0, x, D_wild)
+            return E_new, I_wild_new
+        return sample_x(x, data, conditions_fn, data_fn)
+
+
+    def conditions_fn_mild(x, data):
+        E, I_mild = data
+        return np.sum(x) == sum_C_mild and (E>=0).all() and (E+I>0).all()
+
+    def conditions_fn_wild(x, data):
+        E, I_wild = data
+        return np.sum(x) == sum_C_wild and (E>=0).all() and (E+I_mild+I_wild>0).all()
+
+
+    s0, e0, i_mild0, i_wild0 = inits
+    beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
+    E, I_mild, I_wild, D_mild, D_wild = variables
+    
+    data_mild = [E, I_mild]
+    sum_C_mild = np.sum(C_mild)
+    C_mild, data_mild, log_prob_new, log_prob_old = metropolis_hastings(C_mild, data_mild, fn_mild, proposal_mild, 
+                                                                        conditions_fn_mild, burn_in=30)
+    E, I_mild = data_mild
+    
+    data_wild = [E, I_wild]
+    sum_C_wild = np.sum(C_wild)
+    C_wild, data_wild, log_prob_new, log_prob_old = metropolis_hastings(C_wild, data_wild, fn_wild, proposal_wild, 
+                                                                        conditions_fn_wild, burn_in=30)
+    E, I_wild = data_wild
+
+    return C_mild, C_wild, E, I_mild, I_wild, log_prob_new, log_prob_old
+
+
+def sample_D_mild(D_mild, variables, inits, params, t_ctrl, epsilon):
+    """
+    get a sample from p(B|C, D, params) using metropolis hastings
+    """
+
+    def fn(x, data):
+        I_mild = data[0]
+        # assert (S >= x).all()
+        # assert (x >= 0).all()
+        # add epsilon to prevent log 0.
+        pR = 1-np.exp(-gamma_mild)
+        assert 0 <= pR <= 1
+        assert not np.isnan(pR)
+        return np.sum(np.log(sp.stats.binom(I_mild, pR).pmf(x)+epsilon))
+        
+
+    def proposal(x, data, conditions_fn):
+        I_mild = data[0]
+        def data_fn(x):
+            I_mild_new = compute_I(i_mild0, C_mild, x)
+            return [I_mild_new]
+        
+        return sample_x(x, data, conditions_fn, data_fn)
+
+    def conditions_fn(x, data):
+        I_mild = data[0]
+        return np.sum(x) == sum_D_mild and (E>=0).all() and (E+I_mild+I_wild>0).all()
+
+    s0, e0, i_mild0, i_wild0 = inits
+    beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
+    E, I_mild, I_wild, C_mild = variables
+    data = [I_mild]
+    sum_D_mild = np.sum(D_mild)
+    D_mild, data, log_prob_new, log_prob_old = metropolis_hastings(D_mild, data, fn, proposal, conditions_fn, burn_in=30)
+    return [D_mild] + data + [log_prob_new, log_prob_old]
+
+
+def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsilon, bounds):
     """
     update beta, q, g, gamma with independent MCMC sampling
     each of B, C, D is a list of binomial distributions. The prior is a gamma distribution for each parameter 
@@ -241,7 +347,7 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
     are four; one for each param). 
 
     """
-    def fn(x, data):
+    def fn(x, data=None):
         """
         here x is equal to one of beta, q, g, gamma. since we compute the same likelihood
         function to update each of the params, it is sufficient to use this generic function
@@ -250,30 +356,37 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         other_data['which_param'] stores the parameter to update. it is an index of params
 
         """
-        beta, q, g, gamma = x
+        beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = x
         
-        pC = 1 - np.exp(-g)
-        pR = 1 - np.exp(-gamma)
-        P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I, N)
+        pC_mild = 1 - np.exp(-g_mild)
+        pC_wild = 1 - np.exp(-g_wild)
+        pR_mild = 1 - np.exp(-gamma_mild)
+        pR_wild = 1 - np.exp(-gamma_wild)
+        P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)
 
         # log likelihood
         # add epsilon to avoid log 0.
         logB = np.sum(np.log(sp.stats.binom(S, P).pmf(B) + epsilon))
-        logC = np.sum(np.log(sp.stats.binom(E, pC).pmf(C) + epsilon))
-        logD = np.sum(np.log(sp.stats.binom(I, pR).pmf(D) + epsilon))
+        
+        logC_mild = np.sum(np.log(sp.stats.binom(E, pC_mild).pmf(C_mild) + epsilon))
+        logC_wild = np.sum(np.log(sp.stats.binom(E, pC_wild).pmf(C_wild) + epsilon))
+        
+        logD_mild = np.sum(np.log(sp.stats.binom(I_mild, pR_mild).pmf(D_mild) + epsilon))
+        logD_wild = np.sum(np.log(sp.stats.binom(I_wild, pR_wild).pmf(D_wild) + epsilon))
 
-        # assert not np.isnan(logB)
-        # assert not np.isnan(logC)
-        # assert not np.isnan(logD)
+        assert not np.isnan(logB)
+        assert not np.isnan(logC_mild)
+        assert not np.isnan(logC_wild)
+        assert not np.isnan(logD_mild)
+        assert not np.isnan(logD_wild)
 
         # log prior
         log_prior = 0
-        for i in range(4):
-            a, b = prior_params[i]
+        for i in range(len(data)):
+            a, b = priors[i]
             log_prior += np.log(sp.stats.gamma(a, b).pdf(x[i])+epsilon)
-        # assert not np.isnan(log_prior)
-        
-        return logB + logC + logD + log_prior
+        assert not np.isnan(log_prior)        
+        return logB + logC_mild + logC_wild + logD_mild + logD_wild + log_prior
 
     def proposal(x, data, conditions_fn):
         """
@@ -292,44 +405,54 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         """
         all parameters should be non-negative
         """
-        beta, q, g, gamma = x
-        return (x > 0).all()\
-               and incubation_range[0] <= 1 / g <= incubation_range[1]\
-               and infectious_range[0] <= 1 / gamma <= infectious_range[1]
+        if not (x > 0).all():
+            return False
+
+        for i in range(len(bounds)):
+            a, b = bounds[i]
+            param = x[i]
+            if x < a or x > b:
+                return False
+        return True
 
     
     params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
-    t_rate = transmission_rate(params_new[0], params_new[1], t_ctrl, t_end)
-    return params_new.tolist(), compute_P(t_rate, I, N), t_rate / params_new[3], log_prob_new, log_prob_old
+    beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params_new
+    t_rate = transmission_rate(beta, q, t_ctrl, t_end)
+    R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild))
+    return params_new.tolist(), compute_P(t_rate, I_mild, I_wild, N), R0t, log_prob_new, log_prob_old
 
-def compute_S(s0, t_end, B):
+
+def compute_S(s0, B, N):
     """
     S(0) = s0
-    S(t+1) = S(t) - B(t) for t >= 0
+    S(t+1) = S(t) - B(t) + N(t+1)-N(t) for t >= 0
 
     can be simplified to S(t+1) = s0 - sum(B[:t])
     """
-    return s0 - np.concatenate(([0], np.cumsum(B)[:-1]))
+    return s0 - np.concatenate(([0], np.cumsum(B)[:-1])) + N - N[0]
 
 
-def compute_E(e0, t_end, B, C):
+def compute_E(e0, B, C_mild, C_wild):
     """
     E(0) = e0
-    E(t+1) = E(t) + B(t) - C(t) for t >= 0
+    E(t+1) = E(t) + B(t) - C_mild(t) - C_wild(t) for t >= 0
 
-    can be simplified to E(t+1) = e0+sum(B[:t]-C[:t])
+    can be simplified to E(t+1) = e0+sum(B[:t]-C_mild[:t]-C_wild[:t])
     """
-    return e0 + np.concatenate(([0], np.cumsum(B - C)[:-1]))
+    return e0 + np.concatenate(([0], np.cumsum(B - C_mild - C_wild)[:-1]))
 
 
-def compute_I(i0, t_end, C, D):
+def compute_I(i0, C, D):
     """
+    computes either I_mild or I_wild depending on the inputs
     I(0) = i0
     I(t+1) = I(t) + C(t) - D(t) for t >= 0
 
     can be simplified to I(t+1) = i0+sum(C[:t]-D[:t])
     """
-    return i0 + np.concatenate(([0], np.cumsum(C - D)[:-1]))
+    return i0 + np.concatenate(([0], np.cumsum(C - D_mild)[:-1]))
+
 
 def transmission_rate(beta, q, t_ctrl, t_end):
     """
@@ -351,53 +474,14 @@ def transmission_rate(beta, q, t_ctrl, t_end):
     #     raise e
     return trans_rate
 
-def compute_P(trans_rate, I, N):
+def compute_P(trans_rate, I_mild, I_wild, N):
     """
     P[t] = 1 - exp(-BETA[t] * I[t] / N)
     here BETA[t] = time dependent transmission rate
     """
-    try:
-        return 1 - np.exp(-trans_rate * I / N)
-    except:
-        print(trans_rate, I)
-        raise ValueError
-
-
-def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
-    s0, e0, i0 = inits
-    N = s0
-    S = [s0]
-    E = [e0]
-    I = [i0]
-    R = [N - s0 - e0 - i0]
-    B = []
-    C = []
-    D = []
-    P = []
-    t_rate = transmission_rate(beta, q, t_ctrl, tau - 1)
-    
-    t = 0
-    while t < tau - 1 and I[t] + E[t] > 0:
-        P.append(1-np.exp(-t_rate[t]*I[t]/N))
-        pC = 1-np.exp(-g)
-        pR = 1-np.exp(-gamma)
-
-        B.append(np.random.binomial(S[t], P[t]))
-        C.append(np.random.binomial(E[t], pC))
-        D.append(np.random.binomial(I[t], pR))
-
-        S.append(S[t] - B[t])
-        E.append(E[t] + B[t] - C[t])
-        I.append(I[t] + C[t] - D[t])
-        R.append(N - S[t] - E[t] - I[t])
-        t += 1
-
-        # print(t, B[t], C[t], D[t], E[t], I[t], P[t])
-    if np.sum(B) > 20:
-        print(f"number of observations:{t}")
-        return np.sum(B), np.array(C), np.array(D)
-    else:
-        return create_dataset(inits, beta, q, g, gamma, t_ctrl, tau)
+    P = 1 - np.exp(-trans_rate * (I_mild+I_wild) / np.cumsum(N))
+    assert (P >= 0).all() and (P <= 1).all()
+    return P
 
 
 def read_dataset(filepath, n=3):
@@ -407,10 +491,83 @@ def read_dataset(filepath, n=3):
         return ret[n - 1:] // n
     
     df = pd.read_csv(filepath)
-    C = moving_average(df.num_confirmed_that_day[10:-1].to_numpy())
-    D = moving_average(df.num_death_that_day[10:-1].to_numpy()+df.num_recovered_that_day[10:-1].to_numpy())
+    D_wild = moving_average(df.num_confirmed[:-1].to_numpy())
+    D_wild[D_wild <= 0] = 0
+    
+    N = 1+np.copy(D_wild)
 
-    return C, D
+    return np.floor(N+0.5).astype(int), np.floor(D_wild+0.5).astype(int)
+
+
+def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
+    beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
+    s0, e0, i_mild0, i_wild0 = inits
+    B, P, C_mild, C_wild, D_mild = [], [], [], [], []
+    S, E, I_mild, I_wild = [s0], [e0], [i_mild0], [i_wild0] 
+    t_rate = transmission_rate(beta, q, t_ctrl, len(N))
+    
+    for t in range(len(N)):
+        s, e, i_mild, i_wild = S[t], E[t], I_mild[t], I_wild[t]
+        p = 1-np.exp(-t_rate[t]*(i_mild+i_wild)/N[t])
+        assert 0 <= p <=1
+        
+        b = np.random.binomial(s, p)
+        c_mild = np.random.binomial(e, 1-np.exp(-g_mild))
+        c_wild = np.random.binomial(e, 1-np.exp(-g_wild))
+        d_mild = np.random.binomial(i_mild, 1-np.exp(-gamma_mild))
+        d_wild = D_wild[t]
+
+        if t+1 < len(N):
+            s = s - b + N[t+1] - N[t]
+            e = e + b - c_mild - c_wild
+            i_mild = i_mild + c_mild - d_mild
+            i_wild = i_wild + c_wild - d_wild
+            n_iter = 0
+            while (np.array([p, b, c_mild, c_wild, d_mild, s, e, i_mild, i_wild]) < 0).any() or e+i_mild+i_wild <= 0:
+                print([p, b, c_mild, c_wild, d_mild, s, e, i_mild, i_wild])
+                n_iter += 1
+                if n_iter % 1000 == 0:
+                    print("stuck here")
+                if b < 1:
+                    b += 1
+                if c_mild < 1:
+                    c_mild += 1
+                if c_wild < 1:
+                    c_wild += 1
+                if d_mild < 1:
+                    d_mild += 1
+                if s < 1:
+                    s += 1
+                if e < 1:
+                    e += 1
+                if i_mild < 1:
+                    i_mild += 1
+                if i_wild < 1:
+                    i_wild += 1
+
+                if p < 0:
+                    p += 0.05
+
+                # if attempt <= 0:
+                # raise ValueError("could not initialize with given parameters. try different values...")
+                # else:
+                    # return initialize(inits, params, N, D_wild, t_ctrl, attempt-1)
+            else:
+                S.append(s)
+                E.append(e)
+                I_mild.append(i_mild)
+                I_wild.append(i_wild)
+        
+        B.append(b)
+        C_mild.append(c_mild)
+        C_wild.append(c_wild)
+        D_mild.append(d_mild)
+        P.append(p)
+
+    return [np.array(S), np.array(E), np.array(I_mild), np.array(I_wild),
+           np.array(B), np.array(C_mild), np.array(C_wild), np.array(D_mild), 
+           np.array(P), t_rate]
+
 
 if __name__ == '__main__':
     # N = 5364500
@@ -424,25 +581,23 @@ if __name__ == '__main__':
     # n_burn_in = 3000
     # m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     
-    N = 60550075#51.57*10**3 # population
     # S(0), E(0), I(0)
-    inits = [N, 0, 2]
-    priors = [(2, 10)]*4 # no need to change
-    rand_walk_stds = [0.003, 0.003, 0.003, 0.003] # no need to change
-    t_ctrl = 36          # day on which control measurements were introduced
+    inits = [1, 0, 1, 1]
+    priors = [(2, 10)]*7 # no need to change
+    rand_walk_stds = [0.00005]*7 # no need to change
+    t_ctrl = 46          # day on which control measurements were introduced
     tau = 1000           # no need to change
-    n_iter = 2500       # no need to change
-    n_burn_in = 1500    # no need to change
-    C, D = read_dataset('../datasets/italy_mar_24.csv', n=3) # k = smoothing factor
-    m = np.sum(C)
+    n_iter = 25      # no need to change
+    n_burn_in = 15    # no need to change
+    N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=3) # k = smoothing factor
+    bounds=[(0, np.inf)]*len(priors)
+    params = [0.01]*6+[4]
+    N *= params[6]
 
-
-    incubation_range = [2, 10]
-    infectious_range = [2, 10]
     
-    print(f"1/g = mean incubation period: {incubation_range} days, 1/gamma: mean infectious period: {infectious_range} days")
-    params_mean, params_std, R0_conf, R0ts_conf = train(C, D, N, inits, priors, 
-        rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, incubation_range, infectious_range)[1:]
+    params_mean, params_std, R0_conf, R0ts_conf = train(N, D_wild, inits, params, priors, 
+                                                        rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds
+                                                       )[1:]
     print(f"parameters (beta, q, g, gamma): mean: {params_mean}, std={params_std}\n\n"
           +f"R0 80% confidence interval: {R0_conf}\n\n"
           +f"R0[t] 80% confidence interval: {R0ts_conf}"
