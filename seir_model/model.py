@@ -92,6 +92,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
     print("Initializating Variables...")
     S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, P, t_rate = initialize(inits, params, N, D_wild, t_ctrl)
+    print(E-compute_E(e0, B, C_mild, C_wild))
     epsilon = 1e-16
     print("Initialization Complete.")
     check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P)
@@ -191,7 +192,7 @@ def sample_x(x, data, conditions_fn, data_fn):
     x_new = np.copy(x)
     while n_tries < 1000:
         n_tries += 1
-        t_new = np.random.choice(np.nonzero(x_new)[0], min(20, len(np.nonzero(x_new)[0])), replace=False)
+        t_new = np.random.choice(np.nonzero(x_new)[0], min(1, len(np.nonzero(x_new)[0])), replace=False)
         t_tilde = np.random.choice(range(len(x)), len(t_new), replace=False)
         
         x_new[t_new] -= 1
@@ -207,6 +208,7 @@ def sample_x(x, data, conditions_fn, data_fn):
             x_new[t_new] += 1
             x_new[t_tilde] -= 1
     # assert (E >= 0).all() and (E+I > 0).all()
+    # print("no sample found")
     return x, data
 
 
@@ -228,12 +230,13 @@ def sample_B(B, variables, inits, params, t_ctrl, epsilon):
         def data_fn(x):
             S_new = compute_S(s0, x, N)
             E_new = compute_E(e0, x, C_mild, C_wild)
+            assert sum(E) == sum(E_new)
             return S_new, E_new
-
         return sample_x(x, data, conditions_fn, data_fn)
 
     def conditions_fn(x, data):
         S, E = data
+        # print(np.sum(x) == sum_B, (E>=0).all(), (E+I_mild+I_wild>0).all())
         return np.sum(x) == sum_B and (E>=0).all() and (E+I_mild+I_wild>0).all()
 
     s0, e0, i_mild0, i_wild0 = inits
@@ -373,7 +376,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
         pC_wild = 1 - np.exp(-g_wild)
         pR_mild = 1 - np.exp(-gamma_mild)
         pR_wild = 1 - np.exp(-gamma_wild)
-        N = params[6] * D_wild
+        N = np.floor(params[6] * D_wild+0.5).astype(int)
         P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)
 
         # log likelihood
@@ -492,7 +495,7 @@ def compute_P(trans_rate, I_mild, I_wild, N):
     P[t] = 1 - exp(-BETA[t] * I[t] / N)
     here BETA[t] = time dependent transmission rate
     """
-    P = 1 - np.exp(-trans_rate * (I_mild+I_wild) / np.cumsum(N))
+    P = 1 - np.exp(-trans_rate * (I_mild+I_wild) / (1+N))
     assert (P >= 0).all() and (P <= 1).all()
     return P
 
@@ -504,11 +507,12 @@ def read_dataset(filepath, n=3):
         return ret[n - 1:] // n
     
     df = pd.read_csv(filepath)
-    D_wild = moving_average(df.num_confirmed[:-1].to_numpy())
+    N = moving_average(df.num_confirmed[1:-1].to_numpy())
+    D_wild = moving_average(df.num_confirmed_that_day[1:-1].to_numpy())
+    
+    N[N < 1] = 1
     D_wild[D_wild <= 0] = 0
     
-    N = 1+np.copy(D_wild)
-
     return np.floor(N+0.5).astype(int), np.floor(D_wild+0.5).astype(int)
 
 
@@ -520,6 +524,7 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
     t_rate = transmission_rate(beta, q, t_ctrl, len(N))
     
     for t in range(len(N)):
+        print(t)
         s, e, i_mild, i_wild = S[t], E[t], I_mild[t], I_wild[t]
         p = 1-np.exp(-t_rate[t]*(i_mild+i_wild)/N[t])
         assert 0 <= p <=1
@@ -529,50 +534,27 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
         c_wild = np.random.binomial(e, 1-np.exp(-g_wild))
         d_mild = np.random.binomial(i_mild, 1-np.exp(-gamma_mild))
         d_wild = D_wild[t]
+        if c_wild < d_wild:
+            c_wild = d_wild + np.random.choice(range(3))
+            assert c_wild <= e
+        if c_mild < d_mild:
+            c_mild = d_mild + np.random.choice(range(3))
+            assert c_mild <= e
+
+        if c_mild + c_wild > b+e:
+            b = c_mild + c_wild + np.random.choice(range(3))
+            print(s, b)
+            assert s >= b
 
         if t+1 < len(N):
+            assert N[t+1] - N[t] >=0
+            # b <= s cause binom dist, so s >= 0
             s = s - b + N[t+1] - N[t]
+
             e = e + b - c_mild - c_wild
             i_mild = i_mild + c_mild - d_mild
             i_wild = i_wild + c_wild - d_wild
             n_iter = 0
-            while not (np.array([p, b, c_mild, c_wild, d_mild, s, e, i_mild, i_wild]) >= 0).all() or e+i_mild+i_wild <= 0:
-                n_iter += 1
-                if b < 0:
-                    s += 1
-                    b += 1
-                if s < 0:
-                    b -= 1
-                    e += 1
-                if e < 0:
-                    e += 1
-                    b += 1
-                    s -= 1
-                if c_mild < 0:
-                    c_mild += 1
-                    e -= 1
-                    i_mild += 1
-                if c_wild < 0:
-                    c_wild += 1
-                    e -= 1
-                    i_wild += 1
-                
-                if d_mild < 1:
-                    d_mild += 1
-                    c_mild += 1
-                    e += 1
-                    s += 1
-                if i_mild < 1:
-                    i_mild += 1
-                    c_mild += 1
-                    e -= 1
-
-                if i_wild < 1:
-                    i_wild += 1
-                    c_wild += 1
-                    e -= 1
-                if p < 0:
-                    p = 0.2
 
                 # if attempt <= 0:
                 # raise ValueError("could not initialize with given parameters. try different values...")
@@ -617,7 +599,7 @@ if __name__ == '__main__':
     n_burn_in = 15    # no need to change
     N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=3) # k = smoothing factor
     bounds=[(0, np.inf)]*len(priors)
-    params = [1, 0.001, .80, 0.20, 0.07, 0.33, 10]
+    params = [1, 0.001, .80, 0.20, 0.07, 0.33, 100]
     N *= params[6]
 
     
