@@ -12,7 +12,7 @@ from e_step import update_data, compute_S, compute_E
 np.seterr(all='ignore')
 warnings.filterwarnings('ignore')
 
-def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, bounds):
+def train(C, D, N, inits, t_ctrl, tau, n_iter, n_burn_in, m, bounds):
     """
     C = the number of cases by date of symptom onset
     D = the number of cases who are removed (dead or recovered)
@@ -58,21 +58,26 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     assert n_burn_in < n_iter
 
     # initialize
-    B = np.zeros((t_end,))
-    B[0] = m
-    assert np.sum(B) == m
+    # B = np.zeros((t_end,))
+    # B[0] = m
 
     # initialize model parameters
-    params = [0.2, 0.2, 0.2, 0.2]
-    beta, q, g, gamma = params
+    params = [0.2, 0.001, 0.2, 0.2, 0.0003]
+    beta, q, g, gamma, l = params
     s0, e0, i0 = inits
     epsilon = 1e-16
     
     # initialize I, S, E, P
     I = compute_I(inits[2], t_end, C, D)
+    P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I, N, l)
+    
+    B = compute_B(s0, e0, C, D, P)
+    print(B, I)
+    m = sum(B)
+    assert np.sum(B) == m
+
     S = compute_S(s0, t_end, B)
     E = compute_E(e0, t_end, B, C)
-    P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I, N)
     
     # rep invariants
     # I, S, E should be non-negative
@@ -96,11 +101,11 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
         # MCMC update for B, S, E
         B, S, E, log_prob_new, log_prob_old = update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon)
 
-        assert np.round(np.sum(B)) == m
+        # assert np.round(np.sum(B)) == m
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
         params, P, R0t, log_prob_new, log_prob_old = update_params(B, C, D, P, I, S, E, inits, 
-                                            params, priors, rand_walk_stds, N, t_end, t_ctrl, epsilon, 
+                                            params, N, t_end, t_ctrl, epsilon, 
                                             bounds)
 
         if i >= n_burn_in and i % 5 == 0:
@@ -109,8 +114,8 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
 
         if i % 4 == 0:
             params_r = np.round(params + [log_prob_new, log_prob_old, log_prob_new - log_prob_old, params[0] / params[3]], 5)
-            print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  "
-                + f"log prob new:{params_r[4]}  log prob old:{params_r[5]}  diff:{params_r[6]}"
+            print(f"iter. {i}=> beta:{params_r[0]}  q:{params_r[1]}  g:{params_r[2]}  gamma:{params_r[3]}  l:{params_r[4]}  "
+                + f"log prob new:{params_r[5]}  log prob old:{params_r[6]}  diff:{params_r[7]}"
                 # + f"log prob diff:{params_r[6]}"
                 # + f"  R0:{params_r[7]}")#  R0 -2nd week:{params_r[8]}"
                 )
@@ -134,8 +139,7 @@ def train(C, D, N, inits, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in
     return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_low, R0ts_high)
 
 
-def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_stds,
-                  N, t_end, t_ctrl, epsilon, bounds):
+def update_params(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, epsilon, bounds):
     """
     update beta, q, g, gamma with independent MCMC sampling
     each of B, C, D is a list of binomial distributions. The prior is a gamma distribution for each parameter 
@@ -153,11 +157,11 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         other_data['which_param'] stores the parameter to update. it is an index of params
 
         """
-        beta, q, g, gamma = x
+        beta, q, g, gamma, l = x
         
         pC = 1 - np.exp(-g)
         pR = 1 - np.exp(-gamma)
-        P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I, N)
+        P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I, N, l)
 
         # log likelihood
         # add epsilon to avoid log 0.
@@ -168,23 +172,16 @@ def update_params(B, C, D, P, I, S, E, inits, params, prior_params, rand_walk_st
         # assert not np.isnan(logB)
         # assert not np.isnan(logC)
         # assert not np.isnan(logD)
-
-        # log prior
-        # log_prior = 0
-        # for i in range(4):
-        #     a, b = prior_params[i]
-        #     log_prior += np.log(sp.stats.gamma(a, b).pdf(x[i])+epsilon)
-        # assert not np.isnan(log_prior)
         
         return -(logB + logC + logD)
     
     log_prob_old = fn(np.array(params))
-    # 'trust-constr'
+    # 'trust-constr' SLSQP
     params_new = sp.optimize.minimize(fn, x0=np.array(params), method='SLSQP', bounds=bounds).x
     log_prob_new = fn(params_new)
     
     t_rate = transmission_rate(params_new[0], params_new[1], t_ctrl, t_end)
-    return params_new.tolist(), compute_P(t_rate, I, N), t_rate / params_new[3], log_prob_new, log_prob_old
+    return params_new.tolist(), compute_P(t_rate, I, N, params_new[4]), t_rate / params_new[3] *S/N, log_prob_new, log_prob_old
 
 
 def compute_I(i0, t_end, C, D):
@@ -216,16 +213,33 @@ def transmission_rate(beta, q, t_ctrl, t_end):
     #     raise e
     return trans_rate
 
-def compute_P(trans_rate, I, N):
+def compute_P(trans_rate, I, N, l):
     """
     P[t] = 1 - exp(-BETA[t] * I[t] / N)
     here BETA[t] = time dependent transmission rate
     """
     try:
-        return 1 - np.exp(-trans_rate * I / N)
+        return 1 - np.exp(-l-trans_rate * I/N)
     except:
         print(trans_rate, I)
         raise ValueError
+
+def compute_B(s0, e0, C, D, P):
+    B = []
+    s, e = s0, e0
+    for t in range(len(C)):
+        b = np.random.binomial(s, P[t])
+        j = 0
+        while e+b-C[t] < 0:
+            j += 1
+            b = np.random.binomial(s, P[t])
+            if j % 100 == 0:
+                print(f"Trying to initialize B at t:{t}...")
+        B.append(b)
+        s -= b
+        e = e + b - C[t]
+    return np.array(B)
+
 
 
 def create_dataset(inits, beta, q, g, gamma, t_ctrl, tau):
@@ -272,8 +286,8 @@ def read_dataset(filepath, n=3):
         return ret[n - 1:] // n
     
     df = pd.read_csv(filepath)
-    C = moving_average(df.num_confirmed_that_day[10:-1].to_numpy())
-    D = moving_average(df.num_death_that_day[10:-1].to_numpy()+df.num_recovered_that_day[10:-1].to_numpy())
+    C = moving_average(df.num_confirmed_that_day[1:-1].to_numpy())
+    D = moving_average(df.num_death_that_day[1:-1].to_numpy()+df.num_recovered_that_day[1:-1].to_numpy())
 
     return C, D
 
@@ -289,27 +303,25 @@ if __name__ == '__main__':
     # n_burn_in = 3000
     # m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     
-    N = 60550075#51.57*10**3 # population
+    N = 51.57*10**3 # population
+    # N = 60550075
     # S(0), E(0), I(0)
     inits = [N, 0, 2]
-    priors = [(2, 10)]*4 # no need to change
-    rand_walk_stds = [0.003, 0.003, 0.003, 0.003] # no need to change
-    t_ctrl = 36          # day on which control measurements were introduced
+    t_ctrl = 30          # day on which control measurements were introduced
     tau = 1000           # no need to change
     n_iter = 1000       # no need to change
     n_burn_in = 600    # no need to change
-    C, D = read_dataset('../datasets/italy_mar_24.csv', n=3) # k = smoothing factor
+    C, D = read_dataset('../datasets/korea_mar_24.csv', n=3) # k = smoothing factor
     m = np.sum(C)
 
 
-    incubation_range = [1/8, 1/4]
+    incubation_range = [1/8, 1/2]
     infectious_range = [1/8, 1/2]
     
-    bounds=[[0., 2], [0, 10], incubation_range, infectious_range]
+    bounds=[[0.05, 2], [0, 10], incubation_range, infectious_range, [0, 1]]
 
     print(f"1/mean incubation period: {incubation_range} days, 1/mean infectious period: {infectious_range} days")
-    params_mean, params_std, R0_conf, R0ts_conf = train(C, D, N, inits, priors, 
-        rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, m, bounds)[1:]
+    params_mean, params_std, R0_conf, R0ts_conf = train(C, D, N, inits, t_ctrl, tau, n_iter, n_burn_in, m, bounds)[1:]
     print(f"parameters (beta, q, g, gamma): mean: {params_mean}, std={params_std}\n\n"
           +f"R0 80% confidence interval: {R0_conf}\n\n"
           +f"R0[t] 80% confidence interval: {R0ts_conf}"

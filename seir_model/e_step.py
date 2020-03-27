@@ -40,7 +40,7 @@ def compute_E(e0, t_end, B, C):
     return e0 + np.concatenate(([0], np.cumsum(B - C)[:-1]))
 
 
-def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1, interval=1, num_samples=1):
+def metropolis_hastings(x, fn, proposal, conditions_fn, burn_in=1, interval=1, num_samples=1):
     """
     get num_samples samples from a distribution p(x) ~ k*fn(x) given proposal
     distribution proposal(x) with metropolis hastings algorithm
@@ -55,10 +55,10 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1, interva
     """
     sampled_x = 0
     for i in range(burn_in+interval*num_samples+1):
-        x_new, data_new = proposal(x, data, conditions_fn)
-        accept_log_prob = min(0, fn(x_new, data_new) - fn(x, data))
+        x_new, data_new = proposal(x, conditions_fn)
+        accept_log_prob = min(0, fn(x_new) - fn(x))
         if np.random.binomial(1, np.exp(accept_log_prob)):
-            x, data = x_new, data_new
+            x = x_new
         # else reject the sample
         
         # now save one sample out of interval samples
@@ -67,7 +67,7 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1, interva
     return sampled_x/num_samples
 
 
-def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon):
+def update_data(variables, inits, params, t_end, t_ctrl, m, epsilon):
     """
     get a sample from p(B|C, D, params) using metropolis hastings
     """
@@ -107,21 +107,24 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon
             n_tries += 1
             t_new = np.random.choice(np.nonzero(x_new)[0], min(30, len(np.nonzero(x_new)[0])), replace=False)
             t_tilde = np.random.choice(range(t_end), len(t_new), replace=False)
-            
-            x_new[t_new] -= 1
-            x_new[t_tilde] += 1
+
+            min_val =  1
+            x_new[t_new] -= min_val
+            x_new[t_tilde] += min_val
             S_new = compute_S(s0, t_end, x_new)
             E_new = compute_E(e0, t_end, x_new, C)
 
             if conditions_fn(x_new, [S_new, E_new]):
                 # assert (S_new >= x_new).all()
                 # assert(x_new >= 0).all()
+                # print(x)
                 return x_new, [S_new, E_new]
             else:
                 # revert back the changes
-                x_new[t_new] += 1
-                x_new[t_tilde] -= 1
+                x_new[t_new] += min_val
+                x_new[t_tilde] -= min_val
         # assert (E >= 0).all() and (E+I > 0).all()
+        print("failed")
         return x, [S, E]
 
     def conditions_fn(x, data):
@@ -129,10 +132,11 @@ def update_data(B, C, D, P, I, S, E, inits, params, N, t_end, t_ctrl, m, epsilon
         return np.sum(x) == m and (E>=0).all() and (E+I>0).all()
 
     s0, e0, i0 = inits
-    data = [S, E]
+    B, D_mild, D_severe, P, I, S, E, N = variables
     
     log_prob_old = fn(B, data)
-    B = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=5000, interval=5, num_samples=40)
+    m = np.sum(B)
+    B = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=500, interval=5, num_samples=10)
     B = np.floor(B+0.5).astype(int)
     residue = m-np.sum(B)
     assert np.abs(residue) <= len(B)

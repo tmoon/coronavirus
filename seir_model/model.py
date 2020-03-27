@@ -338,7 +338,7 @@ def sample_D_mild(D_mild, variables, inits, params, t_ctrl, epsilon):
 
     def conditions_fn(x, data):
         I_mild = data[0]
-        return np.sum(x) == sum_D_mild and (E>=0).all() and (E+I_mild+I_wild>0).all()
+        return np.sum(x) == sum_D_mild and (E>=0).all() and (E+I_mild+I_wild>0).all() and (I_mild>=0).all()
 
     s0, e0, i_mild0, i_wild0 = inits
     beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
@@ -373,6 +373,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
         pC_wild = 1 - np.exp(-g_wild)
         pR_mild = 1 - np.exp(-gamma_mild)
         pR_wild = 1 - np.exp(-gamma_wild)
+        N = params[6] * D_wild
         P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)
 
         # log likelihood
@@ -393,7 +394,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
 
         # log prior
         log_prior = 0
-        for i in range(len(data)):
+        for i in range(len(priors)):
             a, b = priors[i]
             log_prior += np.log(sp.stats.gamma(a, b).pdf(x[i])+epsilon)
         assert not np.isnan(log_prior)        
@@ -422,11 +423,12 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
         for i in range(len(bounds)):
             a, b = bounds[i]
             param = x[i]
-            if x < a or x > b:
+            if x[i] < a or x[i] > b:
                 return False
         return True
 
-    
+    S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P, N = variables
+    t_end = len(N)
     params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
     beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
@@ -576,7 +578,7 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
                 # raise ValueError("could not initialize with given parameters. try different values...")
                 # else:
                     # return initialize(inits, params, N, D_wild, t_ctrl, attempt-1)
-            print(t, [p, b, c_mild, c_wild, d_mild, d_wild, s, e, i_mild, i_wild])
+            # print(t, [p, b, c_mild, c_wild, d_mild, d_wild, s, e, i_mild, i_wild])
             S.append(s)
             E.append(e)
             I_mild.append(i_mild)
@@ -608,14 +610,14 @@ if __name__ == '__main__':
     # S(0), E(0), I(0)
     inits = [100, 1, 1, 1]
     priors = [(2, 10)]*7 # no need to change
-    rand_walk_stds = [0.00005]*7 # no need to change
+    rand_walk_stds = [0.005]*7 # no need to change
     t_ctrl = 46          # day on which control measurements were introduced
     tau = 1000           # no need to change
     n_iter = 25      # no need to change
     n_burn_in = 15    # no need to change
     N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=3) # k = smoothing factor
     bounds=[(0, np.inf)]*len(priors)
-    params = [10, 0.001, .99, 0.95, 0.99, 0.95, 10]
+    params = [1, 0.001, .80, 0.20, 0.07, 0.33, 10]
     N *= params[6]
 
     
