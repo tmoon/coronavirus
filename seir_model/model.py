@@ -89,10 +89,9 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
 
     # initialize model parameters
     s0, e0, i_mild0, i_wild0 = inits
-    beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
+    beta, q, delta, g_wild, gamma_mild, gamma_wild, k = params
     print("Initializating Variables...")
     S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, P, t_rate = initialize(inits, params, N, D_wild, t_ctrl)
-    print(E-compute_E(e0, B, C_mild, C_wild))
     epsilon = 1e-16
     print("Initialization Complete.")
     check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P)
@@ -120,7 +119,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
 
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
-        params, P, R0t, log_prob_new, log_prob_old = sample_params(params, [S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P, N], 
+        params, P, N, C_mild, R0t, log_prob_new, log_prob_old = sample_params(params, [S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P, N], 
                                                                     inits, priors, rand_walk_stds, t_ctrl, epsilon, bounds
                                                                    )
         check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P)
@@ -129,9 +128,9 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
-        if i % 2 == 0:
-            beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
-            params_dict = {'beta': beta, 'q': q, 'g_mild': g_mild, 'g_wild':g_wild, 
+        if i % 5 == 0:
+            beta, q, delta, g_wild, gamma_mild, gamma_wild, k = np.round(params, 5)
+            params_dict = {'beta': beta, 'q': q, 'delta': delta, 'g_wild':g_wild, 
                            'gamma_mild':gamma_mild, 'gamma_wild':gamma_wild, 'k': k,
                            'log_prob_new':log_prob_new, 'diff':log_prob_new-log_prob_old, 
                            }
@@ -155,6 +154,9 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
 
     return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_low, R0ts_high)
 
+
+def round_int(x):
+    return np.floor(x+0.5).astype(int)
 
 def check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P):
     """
@@ -192,7 +194,7 @@ def sample_x(x, data, conditions_fn, data_fn):
     x_new = np.copy(x)
     while n_tries < 1000:
         n_tries += 1
-        t_new = np.random.choice(np.nonzero(x_new)[0], min(1, len(np.nonzero(x_new)[0])), replace=False)
+        t_new = np.random.choice(np.nonzero(x_new)[0], min(10, len(np.nonzero(x_new)[0])), replace=False)
         t_tilde = np.random.choice(range(len(x)), len(t_new), replace=False)
         
         x_new[t_new] -= 1
@@ -230,8 +232,7 @@ def sample_B(B, variables, inits, params, t_ctrl, epsilon):
         def data_fn(x):
             S_new = compute_S(s0, x, N)
             E_new = compute_E(e0, x, C_mild, C_wild)
-            assert sum(E) == sum(E_new)
-            return S_new, E_new
+            return [S_new, E_new]
         return sample_x(x, data, conditions_fn, data_fn)
 
     def conditions_fn(x, data):
@@ -252,65 +253,55 @@ def sample_C(C_mild, C_wild, variables, inits, params, t_ctrl, epsilon):
     get a sample from p(B|C, D, params) using metropolis hastings
     """
 
-    def fn_mild(x, data):
-        E, I_mild = data
-        # add epsilon to prevent log 0.
-        pC = 1-np.exp(-g_mild)
-        assert 0 <= pC <= 1
-        assert not np.isnan(pC)
-        return np.sum(np.log(sp.stats.binom(E, pC).pmf(x)+epsilon))
-
-    def fn_wild(x, data):
-        E, I_wild = data
+    def fn(x, data):
+        E, I_mild, I_wild = data
         # add epsilon to prevent log 0.
         pC = 1-np.exp(-g_wild)
         assert 0 <= pC <= 1
         assert not np.isnan(pC)
         return np.sum(np.log(sp.stats.binom(E, pC).pmf(x)+epsilon))
-        
-
-    def proposal_mild(x, data, conditions_fn):
-        E, I_mild = data
-        def data_fn(x):
-            E_new = compute_E(e0, B, x, C_wild)
-            I_mild_new = compute_I(i_mild0, x, D_mild)
-            return E_new, I_mild_new
-        return sample_x(x, data, conditions_fn, data_fn)
 
 
-    def proposal_wild(x, data, conditions_fn):
-        E, I_wild = data
+    def proposal(x, data, conditions_fn):
+        E, I_mild, I_wild = data
         def data_fn(x):
             E_new = compute_E(e0, B, C_mild, x)
+            I_mild_new = compute_I(i_mild0, round_int(delta*x), D_mild)
             I_wild_new = compute_I(i_wild0, x, D_wild)
-            return E_new, I_wild_new
+            return E_new, I_mild_new, I_wild_new
         return sample_x(x, data, conditions_fn, data_fn)
 
 
-    def conditions_fn_mild(x, data):
-        E, I_mild = data
-        return np.sum(x) == sum_C_mild and (E>=0).all() and (E+I>0).all()
-
-    def conditions_fn_wild(x, data):
-        E, I_wild = data
-        return np.sum(x) == sum_C_wild and (E>=0).all() and (E+I_mild+I_wild>0).all()
+    def conditions_fn(x, data):
+        E, I_mild, I_wild = data
+        return np.sum(x) == sum_C_wild and (E>=0).all() and (E+I_mild+I_wild>0).all() and (I_mild >= 0).all() and (I_wild >= 0).all()
 
 
     s0, e0, i_mild0, i_wild0 = inits
-    beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
+    beta, q, delta, g_wild, gamma_mild, gamma_wild, k = params
     B, E, I_mild, I_wild, D_mild, D_wild = variables
     
-    data_mild = [E, I_mild]
+    data = [E, I_mild, I_wild]
     sum_C_mild = np.sum(C_mild)
-    C_mild, data_mild, log_prob_new, log_prob_old = metropolis_hastings(C_mild, data_mild, fn_mild, proposal_mild, 
-                                                                        conditions_fn_mild, burn_in=30)
-    E, I_mild = data_mild
-    
-    data_wild = [E, I_wild]
     sum_C_wild = np.sum(C_wild)
-    C_wild, data_wild, log_prob_new, log_prob_old = metropolis_hastings(C_wild, data_wild, fn_wild, proposal_wild, 
-                                                                        conditions_fn_wild, burn_in=30)
-    E, I_wild = data_wild
+    C_wild_old = C_wild
+    assert (C_mild == round_int(delta*C_wild)).all()
+    C_wild, data, log_prob_new, log_prob_old = metropolis_hastings(C_wild, data, fn, proposal, 
+                                                                        conditions_fn, burn_in=30)
+    E, I_mild, I_wild = data
+    
+    assert np.sum(C_wild) == sum_C_wild
+    assert C_mild = round_int(delta*C_wild)
+    if sum_C_mild != np.sum(C_mild):
+        res = sum_C_mild - np.sum(C_mild)
+        try: 
+            assert res <= len(C_mild)
+            C_mild[:res] += 1
+            I_mild = compute_I(i_mild0, C_mild, D_mild)
+        except AssertionError as e:
+            print(res)
+            print(np.sum(round_int(delta*C_wild_old) - round_int(delta*C_wild)))
+            raise e
 
     return C_mild, C_wild, E, I_mild, I_wild, log_prob_new, log_prob_old
 
@@ -344,7 +335,7 @@ def sample_D_mild(D_mild, variables, inits, params, t_ctrl, epsilon):
         return np.sum(x) == sum_D_mild and (E>=0).all() and (E+I_mild+I_wild>0).all() and (I_mild>=0).all()
 
     s0, e0, i_mild0, i_wild0 = inits
-    beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
+    beta, q, delta, g_wild, gamma_mild, gamma_wild, k = params
     E, I_mild, I_wild, C_mild = variables
     data = [I_mild]
     sum_D_mild = np.sum(D_mild)
@@ -370,28 +361,28 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
         other_data['which_param'] stores the parameter to update. it is an index of params
 
         """
-        beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = x
+        beta, q, delta, g_wild, gamma_mild, gamma_wild, k = x
         
-        pC_mild = 1 - np.exp(-g_mild)
         pC_wild = 1 - np.exp(-g_wild)
         pR_mild = 1 - np.exp(-gamma_mild)
         pR_wild = 1 - np.exp(-gamma_wild)
-        N = np.floor(params[6] * D_wild+0.5).astype(int)
-        P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)
+        N_new = round_int(N/old_k*k)
+        N_new[N_new<1] = 1
+        P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N_new)
 
         # log likelihood
         # add epsilon to avoid log 0.
         logB = np.sum(np.log(sp.stats.binom(S, P).pmf(B) + epsilon))
         
-        logC_mild = np.sum(np.log(sp.stats.binom(E, pC_mild).pmf(C_mild) + epsilon))
         logC_wild = np.sum(np.log(sp.stats.binom(E, pC_wild).pmf(C_wild) + epsilon))
-        
+        logC = len(C_mild)*np.log(delta)+2*logC_wild
+
         logD_mild = np.sum(np.log(sp.stats.binom(I_mild, pR_mild).pmf(D_mild) + epsilon))
         logD_wild = np.sum(np.log(sp.stats.binom(I_wild, pR_wild).pmf(D_wild) + epsilon))
 
         assert not np.isnan(logB)
-        assert not np.isnan(logC_mild)
         assert not np.isnan(logC_wild)
+        assert not np.isnan(logC)
         assert not np.isnan(logD_mild)
         assert not np.isnan(logD_wild)
 
@@ -401,7 +392,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
             a, b = priors[i]
             log_prior += np.log(sp.stats.gamma(a, b).pdf(x[i])+epsilon)
         assert not np.isnan(log_prior)        
-        return logB + logC_mild + logC_wild + logD_mild + logD_wild + log_prior
+        return logB + logC + logD_mild + logD_wild + log_prior
 
     def proposal(x, data, conditions_fn):
         """
@@ -432,11 +423,18 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
 
     S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P, N = variables
     t_end = len(N)
+    beta, q, delta, g_wild, gamma_mild, gamma_wild, k = params
+    old_k = k
     params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
-    beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params_new
+    beta, q, delta, g_wild, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
     R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild))
-    return params_new.tolist(), compute_P(t_rate, I_mild, I_wild, N), R0t, log_prob_new, log_prob_old
+    
+    N = round_int(N/old_k*k)
+    N[N<1] = 1
+    C_mild = round_int(delta*C_wild)    
+    
+    return params_new.tolist(), compute_P(t_rate, I_mild, I_wild, N), N, C_mild, R0t, log_prob_new, log_prob_old
 
 
 def compute_S(s0, B, N):
@@ -517,34 +515,22 @@ def read_dataset(filepath, n=3):
 
 
 def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
-    beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
+    beta, q, delta, g_wild, gamma_mild, gamma_wild, k = params
     s0, e0, i_mild0, i_wild0 = inits
     B, P, C_mild, C_wild, D_mild = [], [], [], [], []
     S, E, I_mild, I_wild = [s0], [e0], [i_mild0], [i_wild0] 
     t_rate = transmission_rate(beta, q, t_ctrl, len(N))
     
     for t in range(len(N)):
-        print(t)
         s, e, i_mild, i_wild = S[t], E[t], I_mild[t], I_wild[t]
         p = 1-np.exp(-t_rate[t]*(i_mild+i_wild)/N[t])
         assert 0 <= p <=1
         
         b = np.random.binomial(s, p)
-        c_mild = np.random.binomial(e, 1-np.exp(-g_mild))
         c_wild = np.random.binomial(e, 1-np.exp(-g_wild))
+        c_mild = np.floor(delta * c_wild+0.5).astype(int)
         d_mild = np.random.binomial(i_mild, 1-np.exp(-gamma_mild))
         d_wild = D_wild[t]
-        if c_wild < d_wild:
-            c_wild = d_wild + np.random.choice(range(3))
-            assert c_wild <= e
-        if c_mild < d_mild:
-            c_mild = d_mild + np.random.choice(range(3))
-            assert c_mild <= e
-
-        if c_mild + c_wild > b+e:
-            b = c_mild + c_wild + np.random.choice(range(3))
-            print(s, b)
-            assert s >= b
 
         if t+1 < len(N):
             assert N[t+1] - N[t] >=0
@@ -555,7 +541,14 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
             i_mild = i_mild + c_mild - d_mild
             i_wild = i_wild + c_wild - d_wild
             n_iter = 0
-
+            try:
+                assert s >= 0
+                assert e >= 0
+                assert i_mild >= 0
+                assert i_wild >= 0
+            except AssertionError as e:
+                print("Could not initialize with the parameters provided. Either try again or try with different parameters\n\n")
+                raise e
                 # if attempt <= 0:
                 # raise ValueError("could not initialize with given parameters. try different values...")
                 # else:
@@ -592,14 +585,16 @@ if __name__ == '__main__':
     # S(0), E(0), I(0)
     inits = [100, 1, 1, 1]
     priors = [(2, 10)]*7 # no need to change
-    rand_walk_stds = [0.005]*7 # no need to change
+    rand_walk_stds = [0.0005]*7 # no need to change
     t_ctrl = 46          # day on which control measurements were introduced
     tau = 1000           # no need to change
-    n_iter = 25      # no need to change
+    n_iter = 50      # no need to change
     n_burn_in = 15    # no need to change
-    N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=3) # k = smoothing factor
+    N, D_wild = read_dataset('../datasets/korea_mar_24.csv', n=3) # k = smoothing factor
     bounds=[(0, np.inf)]*len(priors)
-    params = [1, 0.001, .80, 0.20, 0.07, 0.33, 100]
+    # beta, q, delta, g_wild, gamma_mild, gamma_wild, k
+    # c_mild = delta * c_wild
+    params = [1, 0.1, 2, 0.20, 0.07, 0.33, 100]
     N *= params[6]
 
     
