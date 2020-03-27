@@ -94,7 +94,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, P, t_rate = initialize(inits, params, N, D_wild, t_ctrl)
     epsilon = 1e-16
     print("Initialization Complete.")
-    check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild)
+    check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P)
 
     # initialize B and params
     print(f"n_burn_in:{n_burn_in}")
@@ -108,21 +108,21 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     for i in range(n_iter):
         # MCMC update for B, S, E
         B, S, E, log_prob_new, log_prob_old = sample_B(B, [P, S, E, I_mild, I_wild, N, C_mild, C_wild], inits, params, t_ctrl, epsilon)
-        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild)
+        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P)
 
-        C_mild, C_wild, E, I_mild, I_wild, _, _ = sample_C(C_mild, C_wild, [E, I_mild, I_wild, D_mild, D_wild], 
+        C_mild, C_wild, E, I_mild, I_wild, _, _ = sample_C(C_mild, C_wild, [B, E, I_mild, I_wild, D_mild, D_wild], 
                                                            inits, params, t_ctrl, epsilon)
-        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild)
+        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P)
 
-        D_mild, I_mild, I_wild, _, _ = sample_D_mild(D_mild, [E, I_mild, I_wild, C_mild], inits, params, t_ctrl, epsilon)
-        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild)
+        D_mild, I_mild, _, _ = sample_D_mild(D_mild, [E, I_mild, I_wild, C_mild], inits, params, t_ctrl, epsilon)
+        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P)
 
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
         params, P, R0t, log_prob_new, log_prob_old = sample_params(params, [S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P, N], 
                                                                     inits, priors, rand_walk_stds, t_ctrl, epsilon, bounds
                                                                    )
-        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild)
+        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P)
         
         if i >= n_burn_in and i % 10 == 0:
             saved_params.append(params)
@@ -155,7 +155,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_low, R0ts_high)
 
 
-def check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild):
+def check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P):
     """
     check rep invariant
     """
@@ -295,7 +295,7 @@ def sample_C(C_mild, C_wild, variables, inits, params, t_ctrl, epsilon):
 
     s0, e0, i_mild0, i_wild0 = inits
     beta, q, g_mild, g_wild, gamma_mild, gamma_wild, k = params
-    E, I_mild, I_wild, D_mild, D_wild = variables
+    B, E, I_mild, I_wild, D_mild, D_wild = variables
     
     data_mild = [E, I_mild]
     sum_C_mild = np.sum(C_mild)
@@ -462,7 +462,7 @@ def compute_I(i0, C, D):
 
     can be simplified to I(t+1) = i0+sum(C[:t]-D[:t])
     """
-    return i0 + np.concatenate(([0], np.cumsum(C - D_mild)[:-1]))
+    return i0 + np.concatenate(([0], np.cumsum(C - D)[:-1]))
 
 
 def transmission_rate(beta, q, t_ctrl, t_end):
@@ -534,40 +534,53 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
             i_mild = i_mild + c_mild - d_mild
             i_wild = i_wild + c_wild - d_wild
             n_iter = 0
-            while (np.array([p, b, c_mild, c_wild, d_mild, s, e, i_mild, i_wild]) < 0).any() or e+i_mild+i_wild <= 0:
-                print([p, b, c_mild, c_wild, d_mild, s, e, i_mild, i_wild])
+            while not (np.array([p, b, c_mild, c_wild, d_mild, s, e, i_mild, i_wild]) >= 0).all() or e+i_mild+i_wild <= 0:
                 n_iter += 1
-                if n_iter % 1000 == 0:
-                    print("stuck here")
-                if b < 1:
+                if b < 0:
+                    s += 1
                     b += 1
-                if c_mild < 1:
+                if s < 0:
+                    b -= 1
+                    e += 1
+                if e < 0:
+                    e += 1
+                    b += 1
+                    s -= 1
+                if c_mild < 0:
                     c_mild += 1
-                if c_wild < 1:
+                    e -= 1
+                    i_mild += 1
+                if c_wild < 0:
                     c_wild += 1
+                    e -= 1
+                    i_wild += 1
+                
                 if d_mild < 1:
                     d_mild += 1
-                if s < 1:
-                    s += 1
-                if e < 1:
+                    c_mild += 1
                     e += 1
+                    s += 1
                 if i_mild < 1:
                     i_mild += 1
+                    c_mild += 1
+                    e -= 1
+
                 if i_wild < 1:
                     i_wild += 1
-
+                    c_wild += 1
+                    e -= 1
                 if p < 0:
-                    p += 0.05
+                    p = 0.2
 
                 # if attempt <= 0:
                 # raise ValueError("could not initialize with given parameters. try different values...")
                 # else:
                     # return initialize(inits, params, N, D_wild, t_ctrl, attempt-1)
-            else:
-                S.append(s)
-                E.append(e)
-                I_mild.append(i_mild)
-                I_wild.append(i_wild)
+            print(t, [p, b, c_mild, c_wild, d_mild, d_wild, s, e, i_mild, i_wild])
+            S.append(s)
+            E.append(e)
+            I_mild.append(i_mild)
+            I_wild.append(i_wild)
         
         B.append(b)
         C_mild.append(c_mild)
@@ -593,7 +606,7 @@ if __name__ == '__main__':
     # m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     
     # S(0), E(0), I(0)
-    inits = [1, 0, 1, 1]
+    inits = [100, 1, 1, 1]
     priors = [(2, 10)]*7 # no need to change
     rand_walk_stds = [0.00005]*7 # no need to change
     t_ctrl = 46          # day on which control measurements were introduced
@@ -602,7 +615,7 @@ if __name__ == '__main__':
     n_burn_in = 15    # no need to change
     N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=3) # k = smoothing factor
     bounds=[(0, np.inf)]*len(priors)
-    params = [0.01]*6+[4]
+    params = [10, 0.001, .99, 0.95, 0.99, 0.95, 10]
     N *= params[6]
 
     
