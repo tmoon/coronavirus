@@ -94,19 +94,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, P, t_rate = initialize(inits, params, N, D_wild, t_ctrl)
     epsilon = 1e-16
     print("Initialization Complete.")
-    # initialize I, S, E, P
-    assert (I_mild >= 0).all()    
-    assert (I_wild >= 0).all()    
-    assert (S >= 0).all()
-    assert (E >= 0).all()
-    assert (E + I_mild + I_wild > 0).all()
-    assert (B >= 0).all()
-    assert (C_mild >= 0).all()
-    assert (C_wild >= 0).all()
-    assert (D_mild >= 0).all()
-    assert (D_wild >= 0).all()
-    # P is a list of binomial parameters
-    assert (1 >= P).all() and (P >= 0).all()
+    check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild)
 
     # initialize B and params
     print(f"n_burn_in:{n_burn_in}")
@@ -120,16 +108,22 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     for i in range(n_iter):
         # MCMC update for B, S, E
         B, S, E, log_prob_new, log_prob_old = sample_B(B, [P, S, E, I_mild, I_wild, N, C_mild, C_wild], inits, params, t_ctrl, epsilon)
+        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild)
+
         C_mild, C_wild, E, I_mild, I_wild, _, _ = sample_C(C_mild, C_wild, [E, I_mild, I_wild, D_mild, D_wild], 
                                                            inits, params, t_ctrl, epsilon)
+        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild)
+
         D_mild, I_mild, I_wild, _, _ = sample_D_mild(D_mild, [E, I_mild, I_wild, C_mild], inits, params, t_ctrl, epsilon)
+        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild)
 
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
         params, P, R0t, log_prob_new, log_prob_old = sample_params(params, [S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild, P, N], 
                                                                     inits, priors, rand_walk_stds, t_ctrl, epsilon, bounds
                                                                    )
-
+        check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild)
+        
         if i >= n_burn_in and i % 10 == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
@@ -146,7 +140,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
             print(f"B:\n{B}")
             t0 = t1
 
-    R0s = [p[0] / p[3] for p in saved_params]
+    R0s = [(sum(D_mild)+sum(D_wild)) * p[0] / (sum(D_mild)*p[3]+sum(D_wild)*p[4]) for p in saved_params]
 
     # 80% CI
     CI_FACTOR = 1.28
@@ -160,6 +154,23 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
 
     return B, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_low, R0ts_high)
 
+
+def check_rep_inv(S, E, I_mild, I_wild, B, C_mild, C_wild, D_mild, D_wild):
+    """
+    check rep invariant
+    """
+    assert (I_mild >= 0).all()    
+    assert (I_wild >= 0).all()    
+    assert (S >= 0).all()
+    assert (E >= 0).all()
+    assert (E + I_mild + I_wild > 0).all()
+    assert (B >= 0).all()
+    assert (C_mild >= 0).all()
+    assert (C_wild >= 0).all()
+    assert (D_mild >= 0).all()
+    assert (D_wild >= 0).all()
+    # P is a list of binomial parameters
+    assert (1 >= P).all() and (P >= 0).all()
 
 def sample_x(x, data, conditions_fn, data_fn):
     """
