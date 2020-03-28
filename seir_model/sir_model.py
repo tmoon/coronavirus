@@ -130,7 +130,8 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
 
         # MCMC update for params and P
         # I is fixed by C and D and doesn't need to be updated
-        params, S, I_mild, I_wild, P, N, R0t, log_prob_new, log_prob_old = sample_params(params, [S, I_mild, I_wild, C, D_mild, D_wild, P, N], 
+        params, S, I_mild, I_wild, P, N, R0t, log_prob_new, log_prob_old = sample_params(params, 
+                                                                    [S, I_mild, I_wild, C, D_mild, D_wild, P, N], 
                                                                     inits, priors, rand_walk_stds, t_ctrl, epsilon, bounds
                                                                    )
         check_rep_inv(S, I_mild, I_wild, C, D_mild, D_wild, P)
@@ -139,11 +140,11 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
-        if i % 2 == 0:
+        if i % 10 == 0:
             beta, q, delta, gamma_mild, gamma_wild, k = np.round(params, 5)
             params_dict = {'beta': beta, 'q': q, 'delta': delta, 
                            'gamma_mild':gamma_mild, 'gamma_wild':gamma_wild, 'k': k,
-                           'log_prob_new':log_prob_new, 'diff':log_prob_new-log_prob_old, 
+                           'log_prob_new':np.round(log_prob_new, 5), 'diff':np.round(log_prob_new-log_prob_old, 5) 
                            }
             print(f"iter. {i}=> {params_dict}")
             t1 = time.time()
@@ -220,39 +221,6 @@ def sample_x(x, data, conditions_fn, data_fn):
     # assert (E >= 0).all() and (E+I > 0).all()
     # print("no sample found")
     return x, data
-
-
-# def sample_B(B, variables, inits, params, t_ctrl, epsilon):
-#     """
-#     get a sample from p(B|C, D, params) using metropolis hastings
-#     """
-
-#     def fn(x, data):
-#         S, E = data
-#         # assert (S >= x).all()
-#         # assert (x >= 0).all()
-#         # add epsilon to prevent log 0.
-#         return np.sum(np.log(sp.stats.binom(S, P).pmf(x)+epsilon))
-        
-
-#     def proposal(x, data, conditions_fn):
-#         S, E = data
-#         def data_fn(x):
-#             S_new = compute_S(s0, x, N)
-#             return [S_new, E_new]
-#         return sample_x(x, data, conditions_fn, data_fn)
-
-#     def conditions_fn(x, data):
-#         S, E = data
-#         # print(np.sum(x) == sum_B, (E>=0).all(), (E+I_mild+I_wild>0).all())
-#         return np.sum(x) == sum_B and (E>=0).all() and (E+I_mild+I_wild>0).all()
-
-#     s0, e0, i_mild0, i_wild0 = inits
-#     P, S, E, I_mild, I_wild, N, C_mild, C_wild = variables
-#     data = [S, E]
-#     sum_B = np.sum(B)
-#     B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=30)
-#     return [B] + data + [log_prob_new, log_prob_old]
 
 
 def sample_C(C, variables, inits, params, t_ctrl, epsilon):
@@ -345,7 +313,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     are four; one for each param). 
 
     """
-    def fn(x, data=None):
+    def fn(x, data):
         """
         here x is equal to one of beta, q, g, gamma. since we compute the same likelihood
         function to update each of the params, it is sufficient to use this generic function
@@ -355,12 +323,10 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
 
         """
         beta, q, delta, gamma_mild, gamma_wild, k = x
-        
+        S, I_mild, I_wild, P, N = data
+
         pR_mild = 1 - np.exp(-gamma_mild)
         pR_wild = 1 - np.exp(-gamma_wild)
-        N_new = round_int(N/old_k*k)
-        N_new[N_new<1] = 1
-        P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N_new)
 
         # log likelihood
         # add epsilon to avoid log 0.
@@ -385,12 +351,24 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
         """
         see docstring for previous function
         """
+        S, I_mild, I_wild, P, N = data
         n_tries = 0
         while n_tries < 1000:
             n_tries += 1
+            
             x_new = np.random.normal(x, rand_walk_stds)
-            if conditions_fn(x_new, data):
-                return x_new, data
+            beta, q, delta, gamma_mild, gamma_wild, k = x_new
+            
+            N_new = round_int(N/old_k*k)
+            N_new[N_new<1] = 1
+            S_new = compute_S(s0, C, N_new)
+            I_mild_new =compute_I(i_mild0, round_int(C*delta), D_mild)
+            I_wild_new =compute_I(i_wild0, C-round_int(C*delta), D_wild)            
+            P_new = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild_new, I_wild_new, N_new)
+            data_new = [S_new, I_mild_new, I_wild_new, P_new, N_new]
+
+            if conditions_fn(x_new, data_new):
+                return x_new, data_new
         # print("sample not found")
         return x, data
     
@@ -398,7 +376,13 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
         """
         all parameters should be non-negative
         """
+        beta, q, delta, gamma_mild, gamma_wild, k = x
+        S, I_mild, I_wild, P, N = data
+        
         if not (x > 0).all():
+            return False
+        
+        if not (S >= 0).all() or not (I_mild >= 0).all() or not (I_wild >= 0).all():
             return False
 
         for i in range(len(bounds)):
@@ -412,18 +396,17 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     S, I_mild, I_wild, C, D_mild, D_wild, P, N = variables
     t_end = len(N)
     beta, q, delta, gamma_mild, gamma_wild, k = params
-    old_k = k
-    params_new, _, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), None, fn, proposal, conditions_fn)
+    old_k = k    
+    data = [S, I_mild, I_wild, P, N]
+
+    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn)
     beta, q, delta, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
     R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild))
     
-    N = round_int(N/old_k*k)
-    N[N<1] = 1
+    S, I_mild, I_wild, P, N = data
     
-    I_mild=compute_I(i_mild0, round_int(C*delta), D_mild)
-    I_wild=compute_I(i_wild0, C-round_int(C*delta), D_wild)
-    return params_new.tolist(), compute_S(s0, C, N), I_mild, I_wild, compute_P(t_rate, I_mild, I_wild, N), N, R0t, log_prob_new, log_prob_old
+    return params_new.tolist(), S, I_mild, I_wild, P, N, R0t, log_prob_new, log_prob_old
 
 
 def compute_S(s0, C, N):
@@ -553,7 +536,7 @@ if __name__ == '__main__':
     # m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     
     # S(0), E(0), I(0)
-    inits = [7, 3, 1]
+    inits = [7, 0, 1]
     priors = [(2, 10)]*6 # no need to change
     rand_walk_stds = [0.005]*6 # no need to change
     t_ctrl = 46          # day on which control measurements were introduced
@@ -564,7 +547,7 @@ if __name__ == '__main__':
     bounds=[(0, np.inf)]*len(priors)
     # beta, q, delta, gamma_mild, gamma_wild, k
     # c_mild = delta * c_wild
-    params = [.7, 0.1, 0.5, 0.07, 0.33, 16]
+    params = [2, 0.1, 0.7, 0.09, 0.3, 18]
     N *= params[5]
 
     
