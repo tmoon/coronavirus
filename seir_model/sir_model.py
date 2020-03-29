@@ -530,8 +530,8 @@ if __name__ == '__main__':
     rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
     t_ctrl = 17          # day on which control measurements were introduced
     tau = 1000           # no need to change
-    n_iter = 10000      # no need to change
-    n_burn_in = 5000    # no need to change
+    n_iter = 100000      # no need to change
+    n_burn_in = 30000    # no need to change
     N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=7) # k = smoothing factor
     bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0, 1), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
