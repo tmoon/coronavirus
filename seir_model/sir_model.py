@@ -136,7 +136,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
                                                                    )
         check_rep_inv(S, I_mild, I_wild, C, D_mild, D_wild, P)
         
-        if i >= n_burn_in and i % 100 == 0:
+        if i >= n_burn_in and i % 500 == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
@@ -208,32 +208,17 @@ def sample_x(x, data, conditions_fn, data_fn):
         t_tilde = np.random.choice(range(len(x)), len(t_new), replace=False)
         # t_new += 1
         assert(x_new[t_new] >= 1).all()
-        if np.random.binomial(1, 0.5):
-            change = np.copy(x_new[t_new] // 80)
+        one_off = np.random.binomial(1, 0.5)
+        if one_off:
+            change_add = 1
+            change_subs = 1
         else:
-            change = 1
-        x_new[t_new] -= change
-        # x_new[t_new+1] += change
-        # x_new[t_new-1] += change
-        x_new[t_tilde] += change
+            change_add = np.copy(x_new[t_tilde]//79)
+            change_subs = np.copy(x_new[t_new]//80)
         
-        # pick_last = np.random.binomial(1, 1/(len(x)-6))
-        # if pick_last:
-        #     last_change = x_new[-1] // 80
-        #     x_new[-1] -= last_change
-        #     x_new[-2] += last_change
-        # else:
-        #     last_change = 0
-
-        # pick_first = np.random.binomial(1, 1/(len(x)-6))
-        # if pick_first:
-        #     first_change = min(1, x_new[0])
-        #     x_new[0] -= first_change
-        #     x_new[1] += first_change
-        # else:
-        #     first_change = 0
-
-        # x_new[t_tilde] += 1
+        x_new[t_new] -= change_subs
+        x_new[t_tilde] += change_add
+        
         data_new = data_fn(x_new)
 
         if conditions_fn(x_new, data_new):
@@ -242,15 +227,8 @@ def sample_x(x, data, conditions_fn, data_fn):
             return x_new, data_new
         else:
             # revert back the changes
-            x_new[t_new] += change
-            x_new[t_tilde] -= change
-            # x_new[t_new] += 2*change
-            # x_new[t_new+1] -= change
-            # x_new[t_new-1] -= change
-            # x_new[-1] += last_change
-            # x_new[-2]-= last_change
-            # x_new[0] += last_change
-            # x_new[1]-= last_change
+            x_new[t_new] += change_subs
+            x_new[t_tilde] -= change_add
 
     # assert (E >= 0).all() and (E+I > 0).all()
     # print("no sample found")
@@ -282,7 +260,7 @@ def sample_C(C, variables, inits, params, t_ctrl, epsilon):
         S, I_mild, I_wild, P = data
         old_S, old_I_mild, old_I_wild = variables[:3]
         # print((S-old_S).astype(int))
-        return np.sum(x) == sum_C and (S>=0).all() and (I_mild>=0).all() and (I_wild>=0).all()
+        return  (S>=0).all() and (I_mild>=0).all() and (I_wild>=0).all()
 
 
     t_end = len(C)
@@ -291,7 +269,6 @@ def sample_C(C, variables, inits, params, t_ctrl, epsilon):
     S, I_mild, I_wild, D_mild, D_wild, N, P = variables
     
     data = [S, I_mild, I_wild, P]
-    sum_C = np.sum(C)
     C, data, log_prob_new, log_prob_old = metropolis_hastings(C, data, fn, proposal, conditions_fn, burn_in=30)
     S, I_mild, I_wild, P = data
 
@@ -324,14 +301,13 @@ def sample_D_mild(D_mild, variables, inits, params, t_ctrl, epsilon):
 
     def conditions_fn(x, data):
         I_mild = data[0]
-        return np.sum(x) == sum_D_mild and (I_mild>=0).all()
+        return (I_mild>=0).all()
 
     t_end = len(D_mild)
     s0, i_mild0, i_wild0 = inits
     beta, q, delta, gamma_mild, gamma_wild, k = params
     I_mild, I_wild, C, N = variables
     data = [I_mild]
-    sum_D_mild = np.sum(D_mild)
     D_mild, data, log_prob_new, log_prob_old = metropolis_hastings(D_mild, data, fn, proposal, conditions_fn, burn_in=30)
     I_mild = data[0]
     P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)
@@ -553,9 +529,9 @@ if __name__ == '__main__':
     priors = [(2, 10)]*6 # no need to change
     rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
     t_ctrl = 17          # day on which control measurements were introduced
-    tau = 100000           # no need to change
-    n_iter = 50000      # no need to change
-    n_burn_in = 1000    # no need to change
+    tau = 1000           # no need to change
+    n_iter = 10000      # no need to change
+    n_burn_in = 5000    # no need to change
     N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=7) # k = smoothing factor
     bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0, 1), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
