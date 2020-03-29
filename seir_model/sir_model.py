@@ -525,7 +525,7 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
 
 if __name__ == '__main__':
     # S(0), E(0), I(0)
-    inits = [10, 200, 150]
+    inits = [200, 140, 140]
     priors = [(2, 10)]*6 # no need to change
     rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
     t_ctrl = 17          # day on which control measurements were introduced
@@ -537,7 +537,7 @@ if __name__ == '__main__':
     # beta, q, delta, gamma_mild, gamma_wild, k
     # c_mild = delta * c_wild
     # korea: params = [2.5, 0.05, 0.6, 0.07, 0.3, 5]
-    params = [1.2, 0.05, 0.85, 0.13, 0.33, 0.07]
+    params = [0.8, 0.001, 0.7, 0.13, 0.33, 0.08]
     N = round_int(N/params[5])
 
     
