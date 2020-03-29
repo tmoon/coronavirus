@@ -524,6 +524,10 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
 
 
 if __name__ == '__main__':
+    import os
+    dirname = os.path.dirname(__file__)
+    filename = os.path.join(dirname, '../datasets/italy_mar_24.csv')
+    
     # S(0), E(0), I(0)
     inits = [200, 140, 140]
     priors = [(2, 10)]*6 # no need to change
@@ -532,7 +536,7 @@ if __name__ == '__main__':
     tau = 1000           # no need to change
     n_iter = 100000      # no need to change
     n_burn_in = 30000    # no need to change
-    N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=7) # k = smoothing factor
+    N, D_wild = read_dataset(filename, n=7) # k = smoothing factor
     bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0, 1), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
     # c_mild = delta * c_wild
