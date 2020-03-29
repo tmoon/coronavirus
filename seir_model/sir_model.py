@@ -530,7 +530,7 @@ if __name__ == '__main__':
     out_filename = os.path.join(dirname, '../output.txt')
 
     # S(0), E(0), I(0)
-    inits = [200, 120, 140]
+    inits = [200, 140, 140]
     priors = [(2, 10)]*6 # no need to change
     rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
     t_ctrl = 12          # day on which control measurements were introduced
