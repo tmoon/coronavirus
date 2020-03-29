@@ -136,7 +136,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
                                                                    )
         check_rep_inv(S, I_mild, I_wild, C, D_mild, D_wild, P)
         
-        if i >= n_burn_in and i % 500 == 0:
+        if i >= n_burn_in and i % 5 == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
@@ -156,7 +156,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     R0s = [(sum(D_mild)+sum(D_wild)) * p[0] / (sum(D_mild)*p[3]+sum(D_wild)*p[4]) for p in saved_params]
 
     # 80% CI
-    CI_FACTOR = 1.28
+    CI_FACTOR = 1.96
     R0_low = np.mean(R0s) - CI_FACTOR * np.std(R0s)
     R0_high = np.mean(R0s) + CI_FACTOR * np.std(R0s)
 
@@ -527,32 +527,41 @@ if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
     filename = os.path.join(dirname, '../datasets/italy_mar_24.csv')
-    
+    out_filename = os.path.join(dirname, '../output.txt')
+
     # S(0), E(0), I(0)
-    inits = [200, 140, 140]
+    inits = [200, 120, 140]
     priors = [(2, 10)]*6 # no need to change
     rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
-    t_ctrl = 17          # day on which control measurements were introduced
+    t_ctrl = 12          # day on which control measurements were introduced
     tau = 1000           # no need to change
-    n_iter = 100000      # no need to change
-    n_burn_in = 30000    # no need to change
+    n_iter = 100      # no need to change
+    n_burn_in = 30    # no need to change
     N, D_wild = read_dataset(filename, n=7) # k = smoothing factor
     bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0, 1), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
     # c_mild = delta * c_wild
     # korea: params = [2.5, 0.05, 0.6, 0.07, 0.3, 5]
-    params = [0.8, 0.001, 0.7, 0.13, 0.33, 0.08]
+    params = [0.8, 0.01, 0.7, 0.13, 0.33, 0.075]
     N = round_int(N/params[5])
 
     
     params_mean, params_std, R0_conf, R0ts_conf = train(N, D_wild, inits, params, priors, 
                                                         rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds
                                                        )[1:]
-    print(f"parameters (beta, q, g, gamma): mean: {params_mean}, std={params_std}\n\n"
+    print(f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
           +f"R0 80% confidence interval: {R0_conf}\n\n"
           +f"R0[t] 80% confidence interval: {R0ts_conf}"
         )
     low, high = R0ts_conf
+    
+    with open(out_filename, 'w') as out:
+        out.write(f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
+                 +f"R0 95% confidence interval: {R0_conf}\n\n"
+                 +f"R0[t] 95% confidence interval: {R0ts_conf}\n"
+                 )
+    out.close()
+
     line1, = plt.plot(range(len(N)), low, marker='o', linestyle='solid', linewidth=2, markersize=6, label='lower bound')
     line2, = plt.plot(range(len(N)), high, marker='o', linestyle='solid', linewidth=2, markersize=6, label='upper bound')
  
