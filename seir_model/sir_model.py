@@ -149,7 +149,8 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
             print(f"iter. {i}=> {params_dict}")
             t1 = time.time()
             print("Iter %d: Time %.2f | Runtime: %.2f" % (i, t1 - start_time, t1 - t0))
-            print(f"C:\n{C}")
+            print(f"S:\n{S}")
+            print(f"N:\n{N}")
             t0 = t1
 
     R0s = [(sum(D_mild)+sum(D_wild)) * p[0] / (sum(D_mild)*p[3]+sum(D_wild)*p[4]) for p in saved_params]
@@ -203,33 +204,34 @@ def sample_x(x, data, conditions_fn, data_fn):
     x_new = np.copy(x)
     while n_tries < 1000:
         n_tries += 1
-        t_new = np.random.choice(np.nonzero(x_new[1:-1] > 1)[0], min(5, len(np.nonzero(x_new)[0])), replace=False)
-        # t_tilde = np.random.choice(range(len(x)), len(t_new), replace=False)
-        t_new += 1
+        t_new = np.random.choice(np.nonzero(x_new >= 1)[0], min(5, len(np.nonzero(x_new)[0])), replace=False)
+        t_tilde = np.random.choice(range(len(x)), len(t_new), replace=False)
+        # t_new += 1
         assert(x_new[t_new] >= 1).all()
         if np.random.binomial(1, 0.5):
             change = np.copy(x_new[t_new] // 80)
         else:
             change = 1
-        x_new[t_new] -= 2*change
-        x_new[t_new+1] += change
-        x_new[t_new-1] += change
+        x_new[t_new] -= change
+        # x_new[t_new+1] += change
+        # x_new[t_new-1] += change
+        x_new[t_tilde] += change
         
-        pick_last = np.random.binomial(1, 1/(len(x)-6))
-        if pick_last:
-            last_change = x_new[-1] // 80
-            x_new[-1] -= last_change
-            x_new[-2] += last_change
-        else:
-            last_change = 0
+        # pick_last = np.random.binomial(1, 1/(len(x)-6))
+        # if pick_last:
+        #     last_change = x_new[-1] // 80
+        #     x_new[-1] -= last_change
+        #     x_new[-2] += last_change
+        # else:
+        #     last_change = 0
 
-        pick_first = np.random.binomial(1, 1/(len(x)-6))
-        if pick_first:
-            first_change = min(1, x_new[0])
-            x_new[0] -= first_change
-            x_new[1] += first_change
-        else:
-            first_change = 0
+        # pick_first = np.random.binomial(1, 1/(len(x)-6))
+        # if pick_first:
+        #     first_change = min(1, x_new[0])
+        #     x_new[0] -= first_change
+        #     x_new[1] += first_change
+        # else:
+        #     first_change = 0
 
         # x_new[t_tilde] += 1
         data_new = data_fn(x_new)
@@ -240,15 +242,15 @@ def sample_x(x, data, conditions_fn, data_fn):
             return x_new, data_new
         else:
             # revert back the changes
-            # x_new[t_new] += 1
-            # x_new[t_tilde] -= 1
-            x_new[t_new] += 2*change
-            x_new[t_new+1] -= change
-            x_new[t_new-1] -= change
-            x_new[-1] += last_change
-            x_new[-2]-= last_change
-            x_new[0] += last_change
-            x_new[1]-= last_change
+            x_new[t_new] += change
+            x_new[t_tilde] -= change
+            # x_new[t_new] += 2*change
+            # x_new[t_new+1] -= change
+            # x_new[t_new-1] -= change
+            # x_new[-1] += last_change
+            # x_new[-2]-= last_change
+            # x_new[0] += last_change
+            # x_new[1]-= last_change
 
     # assert (E >= 0).all() and (E+I > 0).all()
     # print("no sample found")
@@ -496,8 +498,8 @@ def read_dataset(filepath, n=3):
         return ret[n - 1:] // n
     
     df = pd.read_csv(filepath)
-    N = moving_average(df.num_confirmed[15:-1].to_numpy())
-    D_wild = moving_average(df.num_confirmed_that_day[15:-1].to_numpy())
+    N = moving_average(df.num_confirmed[27:-1].to_numpy())
+    D_wild = moving_average(df.num_confirmed_that_day[27:-1].to_numpy())
     
     N[N < 1] = 1
     D_wild[D_wild <= 0] = 0
@@ -546,31 +548,20 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
 
 
 if __name__ == '__main__':
-    # N = 5364500
-    # t_end = 100
-    # inits = [N, 1, 0]
-    # priors = [(2, 10)]*4
-    # rand_walk_stds = [0.01, 0.01, 0.01, 0.01]
-    # t_ctrl = 130
-    # tau = 1000
-    # n_iter = 30000
-    # n_burn_in = 3000
-    # m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
-    
     # S(0), E(0), I(0)
-    inits = [7, 3, 2]
+    inits = [10, 200, 150]
     priors = [(2, 10)]*6 # no need to change
     rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
     t_ctrl = 17          # day on which control measurements were introduced
-    tau = 1000           # no need to change
-    n_iter = 20000      # no need to change
-    n_burn_in = 10000    # no need to change
+    tau = 100000           # no need to change
+    n_iter = 50000      # no need to change
+    n_burn_in = 1000    # no need to change
     N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=7) # k = smoothing factor
     bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0, 1), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
     # c_mild = delta * c_wild
     # korea: params = [2.5, 0.05, 0.6, 0.07, 0.3, 5]
-    params = [3.5, 0.1, 0.8, 0.11, 0.3, 0.1]
+    params = [1.2, 0.05, 0.85, 0.13, 0.33, 0.07]
     N = round_int(N/params[5])
 
     
