@@ -402,7 +402,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn)
     beta, q, delta, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
-    R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild))
+    R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild)) * S/N
     
     S, I_mild, I_wild, P, N = data
     
@@ -463,7 +463,6 @@ def compute_P(trans_rate, I_mild, I_wild, N):
     here BETA[t] = time dependent transmission rate
     """
     P = 1 - np.exp(-trans_rate * (I_mild+I_wild) / N)
-    assert (P >= 0).all() and (P <= 1).all()
     return P
 
 
@@ -474,8 +473,8 @@ def read_dataset(filepath, n=3):
         return ret[n - 1:] // n
     
     df = pd.read_csv(filepath)
-    N = moving_average(df.num_confirmed[1:-1].to_numpy())
-    D_wild = moving_average(df.num_confirmed_that_day[1:-1].to_numpy())
+    N = moving_average(df.num_confirmed[20:-1].to_numpy())
+    D_wild = moving_average(df.num_confirmed_that_day[20:-1].to_numpy())
     
     N[N < 1] = 1
     D_wild[D_wild <= 0] = 0
@@ -536,18 +535,19 @@ if __name__ == '__main__':
     # m, C, D = create_dataset(inits, beta=0.2, q=0.2, g=0.2, gamma=0.1429, t_ctrl=t_ctrl, tau=tau)
     
     # S(0), E(0), I(0)
-    inits = [7, 0, 1]
+    inits = [15, 9, 9]
     priors = [(2, 10)]*6 # no need to change
-    rand_walk_stds = [0.005]*6 # no need to change
+    rand_walk_stds = [0.003, 0.003, 0.003, 0.003, 0.003, 0.003] # no need to change
     t_ctrl = 46          # day on which control measurements were introduced
     tau = 1000           # no need to change
-    n_iter = 5000      # no need to change
-    n_burn_in = 3000    # no need to change
-    N, D_wild = read_dataset('../datasets/korea_mar_24.csv', n=3) # k = smoothing factor
+    n_iter = 1000      # no need to change
+    n_burn_in = 800    # no need to change
+    N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=7) # k = smoothing factor
     bounds=[(0, np.inf)]*len(priors)
     # beta, q, delta, gamma_mild, gamma_wild, k
     # c_mild = delta * c_wild
-    params = [2, 0.1, 0.7, 0.09, 0.3, 18]
+    # korea: params = [2.5, 0.05, 0.6, 0.07, 0.3, 5]
+    params = [3.5, 0.1, 0.8, 0.07, 0.3, 5]
     N *= params[5]
 
     
@@ -559,14 +559,14 @@ if __name__ == '__main__':
           +f"R0[t] 80% confidence interval: {R0ts_conf}"
         )
     low, high = R0ts_conf
-    line1, = plt.plot(range(len(low)), low, marker='o', linestyle='solid', linewidth=2, markersize=6, label='lower bound')
-    line2, = plt.plot(range(len(low)), high, marker='o', linestyle='solid', linewidth=2, markersize=6, label='upper bound')
+    line1, = plt.plot(range(len(N)), low, marker='o', linestyle='solid', linewidth=2, markersize=6, label='lower bound')
+    line2, = plt.plot(range(len(N)), high, marker='o', linestyle='solid', linewidth=2, markersize=6, label='upper bound')
  
     plt.xlabel('day t', fontsize=12)
     plt.ylabel('R0_t', fontsize=12)
      
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
-     
+    # plt.ylim(0, 10)
     plt.legend(handles=[line1, line2], fontsize=12)
     plt.show()
