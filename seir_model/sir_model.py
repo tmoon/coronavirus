@@ -136,7 +136,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
                                                                    )
         check_rep_inv(S, I_mild, I_wild, C, D_mild, D_wild, P)
         
-        if i >= n_burn_in and i % 5 == 0:
+        if i >= n_burn_in and i % 500 == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
@@ -535,8 +535,8 @@ if __name__ == '__main__':
     rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
     t_ctrl = 12          # day on which control measurements were introduced
     tau = 1000           # no need to change
-    n_iter = 100      # no need to change
-    n_burn_in = 30    # no need to change
+    n_iter = 100000      # no need to change
+    n_burn_in = 30000    # no need to change
     N, D_wild = read_dataset(filename, n=7) # k = smoothing factor
     bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0, 1), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
