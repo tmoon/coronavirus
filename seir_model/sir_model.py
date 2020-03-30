@@ -216,8 +216,8 @@ def sample_x(x, data, conditions_fn, data_fn):
             # 80 and 79 makes the dist symmetric
             # 79 is the solution 'y' of
             # (n+n/y)-(n+n/y)/80) = n
-            change_add = np.copy(x_new[t_tilde]//79)
-            change_subs = np.copy(x_new[t_new]//80)
+            change_add = np.copy(x_new[t_tilde]//99)
+            change_subs = np.copy(x_new[t_new]//100)
         
         x_new[t_new] -= change_subs
         x_new[t_tilde] += change_add
@@ -416,7 +416,8 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn)
     beta, q, delta, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
-    R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild)) * S/N
+    # R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild)) * S/N
+    R0t = t_rate /(delta*gamma_mild+(1-delta)*gamma_wild) * S/N
     
     S, I_mild, I_wild, P, N = data
     
@@ -477,8 +478,8 @@ def read_dataset(filepath, n=3):
         return ret[n - 1:] // n
     
     df = pd.read_csv(filepath)
-    N = moving_average(df.num_confirmed[27:-1].to_numpy())
-    D_wild = moving_average(df.num_confirmed_that_day[27:-1].to_numpy())
+    N = moving_average(df.num_confirmed[25:-1].to_numpy())
+    D_wild = moving_average(df.num_confirmed_that_day[25:-1].to_numpy())
     
     N[N < 1] = 1
     D_wild[D_wild <= 0] = 0
@@ -502,17 +503,17 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
         d_wild = int(D_wild[t])
         d_mild = N[t] - s - i_mild - i_wild - np.sum(D_wild[:t]).astype(int) - np.sum(D_mild)
         c_up, c_down = int(N[t+1]-N[t]), int(max(d_wild/(1-delta), d_mild/delta))
-        assert c_up >= c_down
+        assert c_up > c_down
 
         c = np.random.binomial(s, p)
         # try 100 times to simulate, if fails, just get something in range
         for n_try in range(100):
-            if c_up >= c >= c_down:
+            if c_up > c >= c_down:
                 break
             else:
                 c = np.random.binomial(s, p)
 
-        if not (c_up >= c >= c_down):
+        if not (c_up > c >= c_down):
             c = np.random.choice(range(c_down, c_up))
 
         c_mild = round_int(c*delta)
@@ -545,25 +546,25 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
 if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
-    filename = os.path.join(dirname, '../datasets/italy_mar_24.csv')
-    out_filename = os.path.join(dirname, '../output_high_var.txt')
+    filename = os.path.join(dirname, '../datasets/korea_mar_24.csv')
+    out_filename = os.path.join(dirname, '../output.txt')
 
-    bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0.1, 0.5), (0, 1)]
+    bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.25), (0.1, 0.5), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
-    params = [0.8, 0.05, 0.86, 0.18, 0.33, 0.1]
+    params = [0.6, 0.05, 0.6, 0.01, 0.33, 0.25] # korea
+    # italy params = [0.8, 0.05, 0.86, 0.18, 0.33, 0.12]
     N, D_wild = read_dataset(filename, n=7) # k = smoothing factor
     N = round_int(N/params[5])
     # S(0), E(0), I(0)
     inits = [N[0], 0, 0]
     priors = [(2, 10)]*6 # no need to change
-    rand_walk_stds = [0.005, 0.005, 0.005, 0.005, 0.005, 0.005] # no need to change
-    t_ctrl = 17          # day on which control measurements were introduced
+    rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
+    t_ctrl = 7          # day on which control measurements were introduced
     tau = 1000           # no need to change
-    n_iter = 100000      # no need to change
-    n_burn_in = 30000    # no need to change
-    save_freq = 500
+    n_iter = 10000      # no need to change
+    n_burn_in = 5000    # no need to change
+    save_freq = 200
     # c_mild = delta * c_wild
-    # korea: params = [2.5, 0.05, 0.6, 0.07, 0.3, 5]
 
     
     params_mean, params_std, R0_conf, R0ts_conf = train(N, D_wild, inits, params, priors, 
