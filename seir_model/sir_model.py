@@ -572,6 +572,7 @@ if __name__ == '__main__':
     params_mean, params_std, R0_conf, R0ts_conf = train(N, D_wild, inits, params, priors, 
                                                         rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds, save_freq
                                                        )[1:]
+    print(f"ouput file: {out_filename}")
     print(f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
           +f"R0 95% confidence interval: {R0_conf}\n\n"
           +f"R0[t] 95% confidence interval: {R0ts_conf}"
