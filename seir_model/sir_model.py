@@ -43,7 +43,7 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1):
 
 
 
-def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds):
+def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds, save_freq):
     """
     C = the number of cases by date of symptom onset
     D = the number of cases who are removed (dead or recovered)
@@ -136,7 +136,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
                                                                    )
         check_rep_inv(S, I_mild, I_wild, C, D_mild, D_wild, P)
         
-        if i >= n_burn_in and i % 500 == 0:
+        if i >= n_burn_in and i % save_freq == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
@@ -479,45 +479,61 @@ def read_dataset(filepath, n=3):
     
     N[N < 1] = 1
     D_wild[D_wild <= 0] = 0
-    
-    return np.floor(N+0.5).astype(int), np.floor(D_wild+0.5).astype(int)
+    return round_int(N), round_int(D_wild)
 
 
 def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
-    for it in range(10):
-        beta, q, delta, gamma_mild, gamma_wild, k = params
-        s0, i_mild0, i_wild0 = inits
-        P, C, D_mild, N_new = [], [], [], []
-        S, I_mild, I_wild = [s0], [i_mild0], [i_wild0] 
-        t_rate = transmission_rate(beta, q, t_ctrl, len(N))
+    beta, q, delta, gamma_mild, gamma_wild, k = params
+    assert (1-delta)/k >= 1
+    s0, i_mild0, i_wild0 = inits
+    P, C, D_mild, N_new = [], [], [], []
+    S, I_mild, I_wild = [s0], [i_mild0], [i_wild0] 
+    t_rate = transmission_rate(beta, q, t_ctrl, len(N))
+    
+    for t in range(len(N)-1):
+        s, i_mild, i_wild = S[t], I_mild[t], I_wild[t]
+        # print(i_mild, i_wild)
+        p = 1-np.exp(-t_rate[t]*(i_mild+i_wild)/N[t])
+        assert 0 <= p <=1
         
-        for t in range(len(N)):
-            s, i_mild, i_wild = S[t], I_mild[t], I_wild[t]
-            p = 1-np.exp(-t_rate[t]*(i_mild+i_wild)/N[t])
-            assert 0 <= p <=1
-            
-            c = np.random.binomial(s, p)
-            c_mild = round_int(c*delta)
-            c_wild = c-c_mild
-            d_mild = np.random.binomial(i_mild, 1-np.exp(-gamma_mild))
-            d_wild = D_wild[t]
-            N_new.append(s+i_mild+i_wild+d_mild+np.sum(D_wild[:t])+np.sum(D_mild[:t-1]))
-            if t+1 < len(N):
-                if N[t+1] < N[t]:
-                    N[t+1] = N[t] 
-                # b <= s cause binom dist, so s >= 0
-                s = s - c + N[t+1] - N[t]
-                i_mild = i_mild + c_mild - d_mild
-                i_wild = i_wild + c_wild - d_wild
-                S.append(s)
-                I_mild.append(i_mild)
-                I_wild.append(i_wild)
-            
-            C.append(c)
-            D_mild.append(d_mild)
-            P.append(p)
-        if it < 9:
-            N = N_new
+        d_wild = int(D_wild[t])
+        d_mild = N[t] - s - i_mild - i_wild - np.sum(D_wild[:t]).astype(int) - np.sum(D_mild)
+        c_up, c_down = int(N[t+1]-N[t]), int(max(d_wild/(1-delta), d_mild/delta))
+        assert c_up >= c_down
+
+        c = np.random.binomial(s, p)
+        # try 100 times to simulate, if fails, just get something in range
+        for n_try in range(100):
+            if c_up >= c >= c_down:
+                break
+            else:
+                c = np.random.binomial(s, p)
+
+        if not (c_up >= c >= c_down):
+            c = np.random.choice(range(c_down, c_up))
+
+        c_mild = round_int(c*delta)
+        c_wild = c-c_mild
+        
+        # b <= s cause binom dist, so s >= 0
+        s = s - c + N[t+1] - N[t]
+        i_mild = i_mild + c_mild - d_mild
+        i_wild = i_wild + c_wild - d_wild
+        S.append(s)
+        I_mild.append(i_mild)
+        I_wild.append(i_wild)
+        
+        C.append(c)
+        D_mild.append(d_mild)
+        P.append(p)
+
+    # last step
+    p = 1-np.exp(-t_rate[-1]*(I_mild[-1]+I_wild[-1])/N[-1])
+    c = np.random.binomial(S[-1], p)
+    d_mild = N[-1] - s - I_mild[-1] - I_wild[-1] - np.sum(D_wild[:-1]).astype(int) - np.sum(D_mild)
+    C.append(c)
+    P.append(p)
+    D_mild.append(d_mild)
 
     return [np.array(S), np.array(I_mild), np.array(I_wild), 
             np.array(C), np.array(D_mild), np.array(P), t_rate, np.array(N)]
@@ -529,34 +545,38 @@ if __name__ == '__main__':
     filename = os.path.join(dirname, '../datasets/italy_mar_24.csv')
     out_filename = os.path.join(dirname, '../output.txt')
 
+    bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0, 1), (0, 1)]
+    # beta, q, delta, gamma_mild, gamma_wild, k
+    params = [0.5, 0.05, 0.7, 0.13, 0.33, 0.18]
+    N, D_wild = read_dataset(filename, n=7) # k = smoothing factor
+    N = round_int(N/params[5])
     # S(0), E(0), I(0)
-    inits = [200, 140, 140]
+    inits = [N[0], 0, 0]
     priors = [(2, 10)]*6 # no need to change
-    rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
+    rand_walk_stds = [0.0008, 0.0008, 0.0008, 0.0008, 0.0008, 0.0008] # no need to change
     t_ctrl = 12          # day on which control measurements were introduced
     tau = 1000           # no need to change
     n_iter = 100000      # no need to change
     n_burn_in = 30000    # no need to change
-    N, D_wild = read_dataset(filename, n=7) # k = smoothing factor
-    bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0, 1), (0, 1)]
-    # beta, q, delta, gamma_mild, gamma_wild, k
+    save_freq = 500
     # c_mild = delta * c_wild
     # korea: params = [2.5, 0.05, 0.6, 0.07, 0.3, 5]
-    params = [0.8, 0.01, 0.7, 0.13, 0.33, 0.075]
-    N = round_int(N/params[5])
 
     
     params_mean, params_std, R0_conf, R0ts_conf = train(N, D_wild, inits, params, priors, 
-                                                        rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds
+                                                        rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds, save_freq
                                                        )[1:]
     print(f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
-          +f"R0 80% confidence interval: {R0_conf}\n\n"
-          +f"R0[t] 80% confidence interval: {R0ts_conf}"
+          +f"R0 95% confidence interval: {R0_conf}\n\n"
+          +f"R0[t] 95% confidence interval: {R0ts_conf}"
         )
     low, high = R0ts_conf
     
     with open(out_filename, 'w') as out:
-        out.write(f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
+        out.write(f"inits (s0, imild0, iwild0): {inits}, rand_walk_stds:{rand_walk_stds}\n"
+                 +f"t_ctrl:{t_ctrl}, t_end:{len(N)}, n_iter:{n_iter}, n_burn_in:{n_burn_in}, save_freq:{save_freq}\n"
+                 +f"bounds:{bounds}\n"
+                 +f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
                  +f"R0 95% confidence interval: {R0_conf}\n\n"
                  +f"R0[t] 95% confidence interval: {R0ts_conf}\n"
                  )
