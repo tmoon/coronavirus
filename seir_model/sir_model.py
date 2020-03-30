@@ -213,6 +213,9 @@ def sample_x(x, data, conditions_fn, data_fn):
             change_add = 1
             change_subs = 1
         else:
+            # 80 and 79 makes the dist symmetric
+            # 79 is the solution 'y' of
+            # (n+n/y)-(n+n/y)/80) = n
             change_add = np.copy(x_new[t_tilde]//79)
             change_subs = np.copy(x_new[t_new]//80)
         
@@ -543,18 +546,18 @@ if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
     filename = os.path.join(dirname, '../datasets/italy_mar_24.csv')
-    out_filename = os.path.join(dirname, '../output.txt')
+    out_filename = os.path.join(dirname, '../output_high_var.txt')
 
-    bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0, 1), (0, 1)]
+    bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0.1, 0.5), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
-    params = [0.5, 0.05, 0.7, 0.13, 0.33, 0.18]
+    params = [0.8, 0.05, 0.86, 0.18, 0.33, 0.1]
     N, D_wild = read_dataset(filename, n=7) # k = smoothing factor
     N = round_int(N/params[5])
     # S(0), E(0), I(0)
     inits = [N[0], 0, 0]
     priors = [(2, 10)]*6 # no need to change
-    rand_walk_stds = [0.0008, 0.0008, 0.0008, 0.0008, 0.0008, 0.0008] # no need to change
-    t_ctrl = 12          # day on which control measurements were introduced
+    rand_walk_stds = [0.005, 0.005, 0.005, 0.005, 0.005, 0.005] # no need to change
+    t_ctrl = 17          # day on which control measurements were introduced
     tau = 1000           # no need to change
     n_iter = 100000      # no need to change
     n_burn_in = 30000    # no need to change
