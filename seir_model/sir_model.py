@@ -471,15 +471,15 @@ def compute_P(trans_rate, I_mild, I_wild, N):
     return P
 
 
-def read_dataset(filepath, n=3):
+def read_dataset(filepath, n=3, offset=1):
     def moving_average(a) :
         ret = np.cumsum(a, dtype=int)
         ret[n:] = ret[n:] - ret[:-n]
         return ret[n - 1:] // n
     
     df = pd.read_csv(filepath)
-    N = moving_average(df.num_confirmed[25:-1].to_numpy())
-    D_wild = moving_average(df.num_confirmed_that_day[25:-1].to_numpy())
+    N = moving_average(df.num_confirmed[offset:-1].to_numpy())
+    D_wild = moving_average(df.num_confirmed_that_day[offset:-1].to_numpy())
     
     N[N < 1] = 1
     D_wild[D_wild <= 0] = 0
@@ -503,18 +503,19 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
         d_wild = int(D_wild[t])
         d_mild = N[t] - s - i_mild - i_wild - np.sum(D_wild[:t]).astype(int) - np.sum(D_mild)
         c_up, c_down = int(N[t+1]-N[t]), int(max(d_wild/(1-delta), d_mild/delta))
-        assert c_up > c_down
+        # print(N[t+1], c_up, c_down)
+        assert c_up >= c_down
 
         c = np.random.binomial(s, p)
         # try 100 times to simulate, if fails, just get something in range
         for n_try in range(100):
-            if c_up > c >= c_down:
+            if c_up >= c >= c_down:
                 break
             else:
                 c = np.random.binomial(s, p)
 
-        if not (c_up > c >= c_down):
-            c = np.random.choice(range(c_down, c_up))
+        if not (c_up >= c >= c_down):
+            c = np.random.choice(range(c_down, max(c_up, c_down+1)))
 
         c_mild = round_int(c*delta)
         c_wild = c-c_mild
@@ -547,23 +548,25 @@ if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
     filename = os.path.join(dirname, '../datasets/korea_mar_24.csv')
-    out_filename = os.path.join(dirname, '../output.txt')
+    out_filename = os.path.join(dirname, '../output_korea_100k_beta2.txt')
 
-    bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.25), (0.1, 0.5), (0, 1)]
+    bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.02, 0.25), (0.07, 0.5), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
-    params = [0.6, 0.05, 0.6, 0.01, 0.33, 0.25] # korea
-    # italy params = [0.8, 0.05, 0.86, 0.18, 0.33, 0.12]
-    N, D_wild = read_dataset(filename, n=7) # k = smoothing factor
+    # italy params = [0.8, 0.05, 0.86, 0.18, 0.33, 0.1]
+    params = [2, 0.05, 0.6, 0.05, 0.33, 0.2]
+    n = 3
+    offset = 29
+    N, D_wild = read_dataset(filename, n, offset) # k = smoothing factor
     N = round_int(N/params[5])
     # S(0), E(0), I(0)
     inits = [N[0], 0, 0]
     priors = [(2, 10)]*6 # no need to change
-    rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
-    t_ctrl = 7          # day on which control measurements were introduced
+    rand_walk_stds = [0.01, 0.0008, 0.0005, 0.0005, 0.001, 0.001] # no need to change
+    t_ctrl = 10          # day on which control measurements were introduced
     tau = 1000           # no need to change
-    n_iter = 10000      # no need to change
-    n_burn_in = 5000    # no need to change
-    save_freq = 200
+    n_iter = 100000      # no need to change
+    n_burn_in = 20000    # no need to change
+    save_freq = 500
     # c_mild = delta * c_wild
 
     
@@ -579,6 +582,7 @@ if __name__ == '__main__':
     with open(out_filename, 'w') as out:
         out.write(f"inits (s0, imild0, iwild0): {inits}, rand_walk_stds:{rand_walk_stds}\n"
                  +f"t_ctrl:{t_ctrl}, t_end:{len(N)}, n_iter:{n_iter}, n_burn_in:{n_burn_in}, save_freq:{save_freq}\n"
+                 +f"offset:{offset}, smoothing:{n}\n"
                  +f"bounds:{bounds}\n"
                  +f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
                  +f"R0 95% confidence interval: {R0_conf}\n\n"
@@ -586,8 +590,10 @@ if __name__ == '__main__':
                  )
     out.close()
 
-    line1, = plt.plot(range(len(N)), low, marker='o', linestyle='solid', linewidth=2, markersize=6, label='lower bound')
-    line2, = plt.plot(range(len(N)), high, marker='o', linestyle='solid', linewidth=2, markersize=6, label='upper bound')
+    mean = (low+high)/2
+    line1, = plt.plot(range(len(low)), low, marker='.', linestyle='dashed', linewidth=2, markersize=4, label='lower bound')
+    line2, = plt.plot(range(len(high)), high, marker='.', linestyle='dashed', linewidth=2, markersize=4, label='upper bound')
+    line3, = plt.plot(range(len(high)), mean, marker='o', linestyle='solid', linewidth=2, markersize=5, label='mean')
  
     plt.xlabel('day t', fontsize=12)
     plt.ylabel('R0_t', fontsize=12)
@@ -595,5 +601,5 @@ if __name__ == '__main__':
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
     # plt.ylim(0, 10)
-    plt.legend(handles=[line1, line2], fontsize=12)
+    plt.legend(handles=[line1, line2, line3], fontsize=12)
     plt.show()
