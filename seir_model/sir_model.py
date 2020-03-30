@@ -564,9 +564,9 @@ if __name__ == '__main__':
     rand_walk_stds = [0.01, 0.0008, 0.0005, 0.0005, 0.001, 0.001] # no need to change
     t_ctrl = 47-offset          # day on which control measurements were introduced
     tau = 1000           # no need to change
-    n_iter = 1000      # no need to change
-    n_burn_in = 200    # no need to change
-    save_freq = 20
+    n_iter = 100000      # no need to change
+    n_burn_in = 20000    # no need to change
+    save_freq = 500
     
     
     params_mean, params_std, R0_conf, R0ts_conf = train(N, D_wild, inits, params, priors, 
