@@ -548,12 +548,12 @@ if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
     filename = os.path.join(dirname, '../datasets/korea_mar_24.csv')
-    out_filename = os.path.join(dirname, '../output_korea_100k_beta2_s0_alws_eq_N0.txt')
+    out_filename = os.path.join(dirname, '../output_korea_100k_beta2_restricted.txt')
 
-    bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.02, 0.25), (0.07, 0.5), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
+    bounds=[(0, np.inf), (0, np.inf), (0.05, 0.95), (0.04, 0.25), (0.07, 0.5), (0.02, 1)]
     # italy params = [0.8, 0.05, 0.86, 0.18, 0.33, 0.1]
-    params = [2, 0.05, 0.6, 0.05, 0.33, 0.2]
+    params = [2, 0.05, 0.6, 0.15, 0.33, 0.2]
     n = 3
     offset = 26
     N, D_wild = read_dataset(filename, n, offset) # k = smoothing factor
@@ -561,7 +561,7 @@ if __name__ == '__main__':
     # Imild(0), Iwild(0)
     inits = [0, 0]
     priors = [(2, 10)]*6 # no need to change
-    rand_walk_stds = [0.01, 0.0008, 0.0005, 0.0005, 0.001, 0.001] # no need to change
+    rand_walk_stds = [0.007, 0.0008, 0.0005, 0.0005, 0.001, 0.001] # no need to change
     t_ctrl = 10          # day on which control measurements were introduced
     tau = 1000           # no need to change
     n_iter = 100000      # no need to change
