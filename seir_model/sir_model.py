@@ -559,7 +559,7 @@ if __name__ == '__main__':
     N, D_wild = read_dataset(filename, n, offset) # k = smoothing factor
     N = round_int(N/params[5])
     # Imild(0), Iwild(0)
-    inits = [0, 0]
+    inits = [N[0], 0, 0]
     priors = [(2, 10)]*6 # no need to change
     rand_walk_stds = [0.007, 0.0008, 0.0005, 0.0005, 0.001, 0.001] # no need to change
     t_ctrl = 20          # day on which control measurements were introduced
