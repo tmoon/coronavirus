@@ -88,7 +88,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     assert n_burn_in < n_iter
 
     # initialize model parameters
-    s0, i_mild0, i_wild0 = inits
+    i_mild0, i_wild0 = inits
     beta, q, delta, gamma_mild, gamma_wild, k = params
     print("Initializating Variables...")
     S, I_mild, I_wild, C, D_mild, P, t_rate, N = initialize(inits, params, N, D_wild, t_ctrl)
@@ -108,7 +108,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     for i in range(n_iter):
         # MCMC update for B, S, E
         beta, q, delta, gamma_mild, gamma_wild, k = params
-        assert (S==compute_S(s0, C, N)).all()
+        assert (S==compute_S(C, N)).all()
         assert (I_mild==compute_I(i_mild0, round_int(C*delta), D_mild)).all()
         assert (I_wild==compute_I(i_wild0, C-round_int(C*delta), D_wild)).all()
         assert (P == compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)).all()
@@ -116,14 +116,14 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
         C, S, I_mild, I_wild, P, _, _ = sample_C(C, [S, I_mild, I_wild, D_mild, D_wild, N, P], 
                                                            inits, params, t_ctrl, epsilon)
         check_rep_inv(S, I_mild, I_wild, C, D_mild, D_wild, P)
-        assert (S==compute_S(s0, C, N)).all()
+        assert (S==compute_S(C, N)).all()
         assert (I_mild==compute_I(i_mild0, round_int(C*delta), D_mild)).all()
         assert (I_wild==compute_I(i_wild0, C-round_int(C*delta), D_wild)).all()
         assert (P == compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)).all()
 
         D_mild, I_mild, P, _, _ = sample_D_mild(D_mild, [I_mild, I_wild, C, N], inits, params, t_ctrl, epsilon)
         check_rep_inv(S, I_mild, I_wild, C, D_mild, D_wild, P)
-        assert (S==compute_S(s0, C, N)).all()
+        assert (S==compute_S(C, N)).all()
         assert (I_mild==compute_I(i_mild0, round_int(C*delta), D_mild)).all()
         assert (I_wild==compute_I(i_wild0, C-round_int(C*delta), D_wild)).all()
         assert (P == compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)).all()
@@ -251,7 +251,7 @@ def sample_C(C, variables, inits, params, t_ctrl, epsilon):
 
     def proposal(x, data, conditions_fn):
         def data_fn(x):
-            S_new = compute_S(s0, x, N)
+            S_new = compute_S(x, N)
             I_mild_new = compute_I(i_mild0, round_int(delta*x), D_mild)
             I_wild_new = compute_I(i_wild0, x - round_int(delta*x), D_wild)
             P_new = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild_new, I_wild_new, N)
@@ -267,7 +267,7 @@ def sample_C(C, variables, inits, params, t_ctrl, epsilon):
 
 
     t_end = len(C)
-    s0, i_mild0, i_wild0 = inits
+    i_mild0, i_wild0 = inits
     beta, q, delta, gamma_mild, gamma_wild, k = params
     S, I_mild, I_wild, D_mild, D_wild, N, P = variables
     
@@ -307,7 +307,7 @@ def sample_D_mild(D_mild, variables, inits, params, t_ctrl, epsilon):
         return (I_mild>=0).all()
 
     t_end = len(D_mild)
-    s0, i_mild0, i_wild0 = inits
+    i_mild0, i_wild0 = inits
     beta, q, delta, gamma_mild, gamma_wild, k = params
     I_mild, I_wild, C, N = variables
     data = [I_mild]
@@ -374,7 +374,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
             
             N_new = round_int(N*old_k/k)
             N_new[N_new<1] = 1
-            S_new = compute_S(s0, C, N_new)
+            S_new = compute_S(C, N_new)
             I_mild_new =compute_I(i_mild0, round_int(C*delta), D_mild)
             I_wild_new =compute_I(i_wild0, C-round_int(C*delta), D_wild)            
             P_new = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild_new, I_wild_new, N_new)
@@ -406,7 +406,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
                 return False
         return True
 
-    s0, i_mild0, i_wild0 = inits
+    i_mild0, i_wild0 = inits
     S, I_mild, I_wild, C, D_mild, D_wild, P, N = variables
     t_end = len(N)
     beta, q, delta, gamma_mild, gamma_wild, k = params
@@ -424,14 +424,14 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     return params_new.tolist(), S, I_mild, I_wild, P, N, R0t, log_prob_new, log_prob_old
 
 
-def compute_S(s0, C, N):
+def compute_S(C, N):
     """
     S(0) = s0
     S(t+1) = S(t) - B(t) + N(t+1)-N(t) for t >= 0
 
     can be simplified to S(t+1) = s0 - sum(B[:t])
     """
-    return s0 - np.concatenate(([0], np.cumsum(C)[:-1])) + N - N[0]
+    return N[0] - np.concatenate(([0], np.cumsum(C)[:-1])) + N - N[0]
 
 
 def compute_I(i0, C, D):
@@ -489,9 +489,9 @@ def read_dataset(filepath, n=3, offset=1):
 def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
     beta, q, delta, gamma_mild, gamma_wild, k = params
     assert (1-delta)/k >= 1
-    s0, i_mild0, i_wild0 = inits
-    P, C, D_mild, N_new = [], [], [], []
-    S, I_mild, I_wild = [s0], [i_mild0], [i_wild0] 
+    i_mild0, i_wild0 = inits
+    P, C, D_mild = [], [], []
+    S, I_mild, I_wild = [N[0]], [i_mild0], [i_wild0] 
     t_rate = transmission_rate(beta, q, t_ctrl, len(N))
     
     for t in range(len(N)-1):
@@ -548,18 +548,18 @@ if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
     filename = os.path.join(dirname, '../datasets/korea_mar_24.csv')
-    out_filename = os.path.join(dirname, '../output_korea_100k_beta2.txt')
+    out_filename = os.path.join(dirname, '../output_korea_100k_beta2_s0_alws_eq_N0.txt')
 
     bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.02, 0.25), (0.07, 0.5), (0, 1)]
     # beta, q, delta, gamma_mild, gamma_wild, k
     # italy params = [0.8, 0.05, 0.86, 0.18, 0.33, 0.1]
     params = [2, 0.05, 0.6, 0.05, 0.33, 0.2]
     n = 3
-    offset = 29
+    offset = 26
     N, D_wild = read_dataset(filename, n, offset) # k = smoothing factor
     N = round_int(N/params[5])
-    # S(0), E(0), I(0)
-    inits = [N[0], 0, 0]
+    # Imild(0), Iwild(0)
+    inits = [0, 0]
     priors = [(2, 10)]*6 # no need to change
     rand_walk_stds = [0.01, 0.0008, 0.0005, 0.0005, 0.001, 0.001] # no need to change
     t_ctrl = 10          # day on which control measurements were introduced
@@ -580,7 +580,7 @@ if __name__ == '__main__':
     low, high = R0ts_conf
     
     with open(out_filename, 'w') as out:
-        out.write(f"inits (s0, imild0, iwild0): {inits}, rand_walk_stds:{rand_walk_stds}\n"
+        out.write(f"inits (imild0, iwild0): {inits}, rand_walk_stds:{rand_walk_stds}\n"
                  +f"t_ctrl:{t_ctrl}, t_end:{len(N)}, n_iter:{n_iter}, n_burn_in:{n_burn_in}, save_freq:{save_freq}\n"
                  +f"offset:{offset}, smoothing:{n}\n"
                  +f"bounds:{bounds}\n"
