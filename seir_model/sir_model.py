@@ -594,6 +594,7 @@ if __name__ == '__main__':
                  +f"t_ctrl:{t_ctrl}, t_end:{len(N)}, n_iter:{n_iter}, n_burn_in:{n_burn_in}, save_freq:{save_freq}\n"
                  +f"offset:{offset}, last_offset:{last_offset}, smoothing:{n}\n"
                  +f"bounds:{bounds}\n"
+                 +f"param inits:{params}\n"
                  +f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
                  +f"R0 95% confidence interval: {R0_conf}\n\n"
                  +f"R0[t] 95% confidence interval: {R0ts_conf}\n"
