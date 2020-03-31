@@ -1,3 +1,4 @@
+import argparse
 import numpy as np 
 import scipy as sp
 import pandas as pd
@@ -547,20 +548,25 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
 if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
+    default_in_filename = os.path.join(dirname, '../datasets/italy_mar_30.csv')
+    default_out_filename = os.path.join(dirname, '../output_italy_start_feb19_lockdown_mar9.txt')
+
+    parser = argparse.ArgumentParser(description='Learn an SIR model for the COVID-19 infected data.')
+    parser.add_argument('infile', type=str, help='Directory for the location of the input file',
+                        default=default_in_filename, nargs='?')
+    parser.add_argument('outfile', type=str, help='Directory for the location of the input file',
+                        default=default_in_filename, nargs='?')
+    parser.add_argument('params', type=float, default=(0.8, 0.05, 0.8, 0.18, 0.33, 0.1), nargs='?')
+    parser.add_argument('n', type=int, default=3, nargs='?')
+    parser.add_argument('offset', type=int, default=28, nargs='?')
+    parser.add_argument('last_offset', type=int, default=1, nargs='?')
+    parser.add_argument('lockdown', type=int, default=47, nargs='?')
+    parser.add_argument('rand_walk_stds', type=float, default=(0.009, 0.001, 0.001, 0.001, 0.001, 0.001), nargs='?')
 
     # beta, q, delta, gamma_mild, gamma_wild, k
     bounds=[(0, np.inf), (0, np.inf), (0.05, 0.95), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
     # params = [2, 0.05, 0.6, 0.15, 0.33, 0.2] # korea
     
-    # italy
-    filename = os.path.join(dirname, '../datasets/italy_mar_30.csv')
-    out_filename = os.path.join(dirname, '../output_italy_start_feb19_lockdown_mar9.txt')
-    params = [0.8, 0.05, 0.8, 0.18, 0.33, 0.1] # italy
-    n = 3
-    offset, last_offset = 28, 1
-    lockdown = 47
-    rand_walk_stds = [0.009, 0.001, 0.001, 0.001, 0.001, 0.001]
-
     # korea
     filename = os.path.join(dirname, '../datasets/korea_mar_30.csv')
     out_filename = os.path.join(dirname, '../output_korea_start_feb19_lockdown_feb26.txt')
@@ -569,7 +575,18 @@ if __name__ == '__main__':
     offset, last_offset = 30, 1
     lockdown = 37
     rand_walk_stds = [0.01, 0.001, 0.001, 0.001, 0.001, 0.001]
-    
+
+    # italy
+    args = parser.parse_args()
+    params = list(args.params) # italy
+    rand_walk_stds = list(args.rand_walk_stds)
+    assert len(params) == 6 and len(rand_walk_stds) == 6, "Need all parameters and their random walk stds"
+    n = args.n
+    offset, last_offset = args.offset, args.last_offset
+    lockdown = args.lockdown
+    filename = args.infile
+    out_filename = args.outfile
+
     # wuhan
     # params = [0.5, 0.001, 0.8, 0.18, 0.33, 0.1]
     # n = 5
