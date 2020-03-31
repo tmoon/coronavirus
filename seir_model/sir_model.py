@@ -471,15 +471,15 @@ def compute_P(trans_rate, I_mild, I_wild, N):
     return P
 
 
-def read_dataset(filepath, n=3, offset=1):
+def read_dataset(filepath, n=3, offset=1, last_offset=1):
     def moving_average(a) :
         ret = np.cumsum(a, dtype=int)
         ret[n:] = ret[n:] - ret[:-n]
         return ret[n - 1:] // n
     
     df = pd.read_csv(filepath)
-    N = moving_average(df.num_confirmed[offset:-1].to_numpy())
-    D_wild = moving_average(df.num_confirmed_that_day[offset:-1].to_numpy())
+    N = moving_average(df.num_confirmed[offset:-last_offset].to_numpy())
+    D_wild = moving_average(df.num_confirmed_that_day[offset:-last_offset].to_numpy())
     
     N[N < 1] = 1
     D_wild[D_wild <= 0] = 0
@@ -547,22 +547,32 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
 if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
-    filename = os.path.join(dirname, '../datasets/korea_mar_24.csv')
-    out_filename = os.path.join(dirname, '../output_italy_s0eqN0_tctrl_eq_lockdown.txt')
+    filename = os.path.join(dirname, '../datasets/wuhan_china_mar_24.csv')
+    out_filename = os.path.join(dirname, '../output_china_lockdown.txt')
 
     # beta, q, delta, gamma_mild, gamma_wild, k
     bounds=[(0, np.inf), (0, np.inf), (0.05, 0.95), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
-    params = [2, 0.05, 0.8, 0.18, 0.33, 0.1] # italy
     # params = [2, 0.05, 0.6, 0.15, 0.33, 0.2] # korea
-    n = 3
-    offset = 30
-    N, D_wild = read_dataset(filename, n, offset) # k = smoothing factor
+    # italy
+    # params = [2, 0.05, 0.8, 0.18, 0.33, 0.1] # italy
+    # n = 3
+    # offset, last_offset = 30, 1
+    # lockdown = 47
+
+    # china
+    params = [0.6, 0.05, 0.8, 0.18, 0.33, 0.1] # italy
+    n = 5
+    offset, last_offset = 2, 12
+    lockdown = 3
+
+    N, D_wild = read_dataset(filename, n, offset, last_offset) # k = smoothing factor
     N = round_int(N/params[5])
     # Imild(0), Iwild(0)
     inits = [0, 0]
     priors = [(2, 10)]*6 # no need to change
     rand_walk_stds = [0.01, 0.0008, 0.0005, 0.0005, 0.001, 0.001] # no need to change
-    t_ctrl = 47-offset          # day on which control measurements were introduced
+    t_ctrl = lockdown-offset          # day on which control measurements were introduced
+    assert t_ctrl >= 0
     tau = 1000           # no need to change
     n_iter = 100000      # no need to change
     n_burn_in = 20000    # no need to change
@@ -582,7 +592,7 @@ if __name__ == '__main__':
     with open(out_filename, 'w') as out:
         out.write(f"inits (imild0, iwild0): {inits}, rand_walk_stds:{rand_walk_stds}\n"
                  +f"t_ctrl:{t_ctrl}, t_end:{len(N)}, n_iter:{n_iter}, n_burn_in:{n_burn_in}, save_freq:{save_freq}\n"
-                 +f"offset:{offset}, smoothing:{n}\n"
+                 +f"offset:{offset}, last_offset:{last_offset}, smoothing:{n}\n"
                  +f"bounds:{bounds}\n"
                  +f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
                  +f"R0 95% confidence interval: {R0_conf}\n\n"
