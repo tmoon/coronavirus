@@ -146,9 +146,9 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
                            'gamma_mild':gamma_mild, 'gamma_wild':gamma_wild, 'k': k,
                            'log_prob_new':np.round(log_prob_new, 5), 'diff':np.round(log_prob_new-log_prob_old, 5) 
                            }
-            print(f"iter. {i}=> {params_dict}")
+            print(f"iter {i}:\n{params_dict}")
             t1 = time.time()
-            print("Iter %d: Time %.2f | Runtime: %.2f" % (i, t1 - start_time, t1 - t0))
+            print("iter %d: Time %.2f | Runtime: %.2f" % (i, t1 - start_time, t1 - t0))
             print(f"S:\n{S}")
             print(f"N:\n{N}")
             t0 = t1
@@ -548,7 +548,7 @@ if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
     filename = os.path.join(dirname, '../datasets/wuhan_china_mar_24.csv')
-    out_filename = os.path.join(dirname, '../output_china_lockdown.txt')
+    out_filename = os.path.join(dirname, '../output_china_lockdown_trial2.txt')
 
     # beta, q, delta, gamma_mild, gamma_wild, k
     bounds=[(0, np.inf), (0, np.inf), (0.05, 0.95), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
@@ -560,7 +560,7 @@ if __name__ == '__main__':
     # lockdown = 47
 
     # china
-    params = [0.6, 0.05, 0.8, 0.18, 0.33, 0.1] # italy
+    params = [0.1, 0.05, 0.8, 0.18, 0.33, 0.1]
     n = 5
     offset, last_offset = 2, 12
     lockdown = 3
@@ -570,7 +570,7 @@ if __name__ == '__main__':
     # Imild(0), Iwild(0)
     inits = [0, 0]
     priors = [(2, 10)]*6 # no need to change
-    rand_walk_stds = [0.01, 0.0008, 0.0005, 0.0005, 0.001, 0.001] # no need to change
+    rand_walk_stds = [0.008, 0.001, 0.0005, 0.0005, 0.0005, 0.001] # no need to change
     t_ctrl = lockdown-offset          # day on which control measurements were introduced
     assert t_ctrl >= 0
     tau = 1000           # no need to change
