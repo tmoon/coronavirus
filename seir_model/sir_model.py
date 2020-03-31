@@ -547,8 +547,8 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
 if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
-    filename = os.path.join(dirname, '../datasets/new_york_mar_30.csv')
-    out_filename = os.path.join(dirname, '../output_ny_lockdown_mar29.txt')
+    filename = os.path.join(dirname, '../datasets/germany_mar_30.csv')
+    out_filename = os.path.join(dirname, '../output_germany_lockdown_mar20.txt')
 
     # beta, q, delta, gamma_mild, gamma_wild, k
     bounds=[(0, np.inf), (0, np.inf), (0.05, 0.95), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
@@ -566,10 +566,16 @@ if __name__ == '__main__':
     # lockdown = 3
 
     # new york
-    params = [0.7, 0.001, 0.8, 0.18, 0.33, 0.18]
+    # params = [0.7, 0.001, 0.8, 0.18, 0.33, 0.18]
+    # n = 5
+    # offset, last_offset = 44, 1
+    # lockdown = 66
+
+    # germany
+    params = [0.7, 0.001, 0.6, 0.18, 0.33, 0.22]
     n = 5
-    offset, last_offset = 44, 1
-    lockdown = 66
+    offset, last_offset = 33, 1
+    lockdown = 58
 
     N, D_wild = read_dataset(filename, n, offset, last_offset) # k = smoothing factor
     N = round_int(N/params[5])
