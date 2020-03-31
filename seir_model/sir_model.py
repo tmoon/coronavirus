@@ -43,7 +43,7 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1):
 
 
 
-def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds):
+def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds, save_freq):
     """
     C = the number of cases by date of symptom onset
     D = the number of cases who are removed (dead or recovered)
@@ -88,7 +88,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     assert n_burn_in < n_iter
 
     # initialize model parameters
-    s0, i_mild0, i_wild0 = inits
+    i_mild0, i_wild0 = inits
     beta, q, delta, gamma_mild, gamma_wild, k = params
     print("Initializating Variables...")
     S, I_mild, I_wild, C, D_mild, P, t_rate, N = initialize(inits, params, N, D_wild, t_ctrl)
@@ -108,7 +108,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     for i in range(n_iter):
         # MCMC update for B, S, E
         beta, q, delta, gamma_mild, gamma_wild, k = params
-        assert (S==compute_S(s0, C, N)).all()
+        assert (S==compute_S(C, N)).all()
         assert (I_mild==compute_I(i_mild0, round_int(C*delta), D_mild)).all()
         assert (I_wild==compute_I(i_wild0, C-round_int(C*delta), D_wild)).all()
         assert (P == compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)).all()
@@ -116,14 +116,14 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
         C, S, I_mild, I_wild, P, _, _ = sample_C(C, [S, I_mild, I_wild, D_mild, D_wild, N, P], 
                                                            inits, params, t_ctrl, epsilon)
         check_rep_inv(S, I_mild, I_wild, C, D_mild, D_wild, P)
-        assert (S==compute_S(s0, C, N)).all()
+        assert (S==compute_S(C, N)).all()
         assert (I_mild==compute_I(i_mild0, round_int(C*delta), D_mild)).all()
         assert (I_wild==compute_I(i_wild0, C-round_int(C*delta), D_wild)).all()
         assert (P == compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)).all()
 
         D_mild, I_mild, P, _, _ = sample_D_mild(D_mild, [I_mild, I_wild, C, N], inits, params, t_ctrl, epsilon)
         check_rep_inv(S, I_mild, I_wild, C, D_mild, D_wild, P)
-        assert (S==compute_S(s0, C, N)).all()
+        assert (S==compute_S(C, N)).all()
         assert (I_mild==compute_I(i_mild0, round_int(C*delta), D_mild)).all()
         assert (I_wild==compute_I(i_wild0, C-round_int(C*delta), D_wild)).all()
         assert (P == compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)).all()
@@ -136,7 +136,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
                                                                    )
         check_rep_inv(S, I_mild, I_wild, C, D_mild, D_wild, P)
         
-        if i >= n_burn_in and i % 500 == 0:
+        if i >= n_burn_in and i % save_freq == 0:
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
@@ -146,9 +146,9 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
                            'gamma_mild':gamma_mild, 'gamma_wild':gamma_wild, 'k': k,
                            'log_prob_new':np.round(log_prob_new, 5), 'diff':np.round(log_prob_new-log_prob_old, 5) 
                            }
-            print(f"iter. {i}=> {params_dict}")
+            print(f"iter {i}:\n{params_dict}")
             t1 = time.time()
-            print("Iter %d: Time %.2f | Runtime: %.2f" % (i, t1 - start_time, t1 - t0))
+            print("iter %d: Time %.2f | Runtime: %.2f" % (i, t1 - start_time, t1 - t0))
             print(f"S:\n{S}")
             print(f"N:\n{N}")
             t0 = t1
@@ -156,7 +156,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
     R0s = [(sum(D_mild)+sum(D_wild)) * p[0] / (sum(D_mild)*p[3]+sum(D_wild)*p[4]) for p in saved_params]
 
     # 80% CI
-    CI_FACTOR = 1.28
+    CI_FACTOR = 1.96
     R0_low = np.mean(R0s) - CI_FACTOR * np.std(R0s)
     R0_high = np.mean(R0s) + CI_FACTOR * np.std(R0s)
 
@@ -213,8 +213,11 @@ def sample_x(x, data, conditions_fn, data_fn):
             change_add = 1
             change_subs = 1
         else:
-            change_add = np.copy(x_new[t_tilde]//79)
-            change_subs = np.copy(x_new[t_new]//80)
+            # 80 and 79 makes the dist symmetric
+            # 79 is the solution 'y' of
+            # (n+n/y)-(n+n/y)/80) = n
+            change_add = np.copy(x_new[t_tilde]//99)
+            change_subs = np.copy(x_new[t_new]//100)
         
         x_new[t_new] -= change_subs
         x_new[t_tilde] += change_add
@@ -243,12 +246,12 @@ def sample_C(C, variables, inits, params, t_ctrl, epsilon):
     def fn(x, data):
         S, I_mild, I_wild, P = data
         # add epsilon to prevent log 0.
-        return len(x)*np.log(delta*(1-delta))+np.sum(np.log(sp.stats.binom(S, P).pmf(x)+epsilon))
+        return np.sum(np.log(sp.stats.binom(S, P).pmf(x)+epsilon))
 
 
     def proposal(x, data, conditions_fn):
         def data_fn(x):
-            S_new = compute_S(s0, x, N)
+            S_new = compute_S(x, N)
             I_mild_new = compute_I(i_mild0, round_int(delta*x), D_mild)
             I_wild_new = compute_I(i_wild0, x - round_int(delta*x), D_wild)
             P_new = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild_new, I_wild_new, N)
@@ -264,7 +267,7 @@ def sample_C(C, variables, inits, params, t_ctrl, epsilon):
 
 
     t_end = len(C)
-    s0, i_mild0, i_wild0 = inits
+    i_mild0, i_wild0 = inits
     beta, q, delta, gamma_mild, gamma_wild, k = params
     S, I_mild, I_wild, D_mild, D_wild, N, P = variables
     
@@ -304,7 +307,7 @@ def sample_D_mild(D_mild, variables, inits, params, t_ctrl, epsilon):
         return (I_mild>=0).all()
 
     t_end = len(D_mild)
-    s0, i_mild0, i_wild0 = inits
+    i_mild0, i_wild0 = inits
     beta, q, delta, gamma_mild, gamma_wild, k = params
     I_mild, I_wild, C, N = variables
     data = [I_mild]
@@ -340,7 +343,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
 
         # log likelihood
         # add epsilon to avoid log 0.
-        logC = len(C) *np.log(delta*(1-delta)) + np.sum(np.log(sp.stats.binom(S, P).pmf(C) + epsilon))
+        logC = np.sum(np.log(sp.stats.binom(S, P).pmf(C) + epsilon))
 
         logD_mild = np.sum(np.log(sp.stats.binom(I_mild, pR_mild).pmf(D_mild) + epsilon))
         logD_wild = np.sum(np.log(sp.stats.binom(I_wild, pR_wild).pmf(D_wild) + epsilon))
@@ -371,7 +374,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
             
             N_new = round_int(N*old_k/k)
             N_new[N_new<1] = 1
-            S_new = compute_S(s0, C, N_new)
+            S_new = compute_S(C, N_new)
             I_mild_new =compute_I(i_mild0, round_int(C*delta), D_mild)
             I_wild_new =compute_I(i_wild0, C-round_int(C*delta), D_wild)            
             P_new = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild_new, I_wild_new, N_new)
@@ -403,7 +406,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
                 return False
         return True
 
-    s0, i_mild0, i_wild0 = inits
+    i_mild0, i_wild0 = inits
     S, I_mild, I_wild, C, D_mild, D_wild, P, N = variables
     t_end = len(N)
     beta, q, delta, gamma_mild, gamma_wild, k = params
@@ -413,21 +416,22 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn)
     beta, q, delta, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
-    R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild)) * S/N
+    # R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild)) * S/N
+    R0t = t_rate /(delta*gamma_mild+(1-delta)*gamma_wild) * S/N
     
     S, I_mild, I_wild, P, N = data
     
     return params_new.tolist(), S, I_mild, I_wild, P, N, R0t, log_prob_new, log_prob_old
 
 
-def compute_S(s0, C, N):
+def compute_S(C, N):
     """
     S(0) = s0
     S(t+1) = S(t) - B(t) + N(t+1)-N(t) for t >= 0
 
     can be simplified to S(t+1) = s0 - sum(B[:t])
     """
-    return s0 - np.concatenate(([0], np.cumsum(C)[:-1])) + N - N[0]
+    return N[0] - np.concatenate(([0], np.cumsum(C)[:-1])) + N - N[0]
 
 
 def compute_I(i0, C, D):
@@ -467,90 +471,140 @@ def compute_P(trans_rate, I_mild, I_wild, N):
     return P
 
 
-def read_dataset(filepath, n=3):
+def read_dataset(filepath, n=3, offset=1, last_offset=1):
     def moving_average(a) :
         ret = np.cumsum(a, dtype=int)
         ret[n:] = ret[n:] - ret[:-n]
         return ret[n - 1:] // n
     
     df = pd.read_csv(filepath)
-    N = moving_average(df.num_confirmed[27:-1].to_numpy())
-    D_wild = moving_average(df.num_confirmed_that_day[27:-1].to_numpy())
+    N = moving_average(df.num_confirmed[offset:-last_offset].to_numpy())
+    D_wild = moving_average(df.num_confirmed_that_day[offset:-last_offset].to_numpy())
     
     N[N < 1] = 1
     D_wild[D_wild <= 0] = 0
-    
-    return np.floor(N+0.5).astype(int), np.floor(D_wild+0.5).astype(int)
+    return round_int(N), round_int(D_wild)
 
 
 def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
-    for it in range(10):
-        beta, q, delta, gamma_mild, gamma_wild, k = params
-        s0, i_mild0, i_wild0 = inits
-        P, C, D_mild, N_new = [], [], [], []
-        S, I_mild, I_wild = [s0], [i_mild0], [i_wild0] 
-        t_rate = transmission_rate(beta, q, t_ctrl, len(N))
+    beta, q, delta, gamma_mild, gamma_wild, k = params
+    assert (1-delta)/k >= 1
+    i_mild0, i_wild0 = inits
+    P, C, D_mild, N_new = [], [], [], []
+    S, I_mild, I_wild = [N[0]], [i_mild0], [i_wild0] 
+    t_rate = transmission_rate(beta, q, t_ctrl, len(N))
+    
+    for t in range(len(N)-1):
+        s, i_mild, i_wild = S[t], I_mild[t], I_wild[t]
+        # print(i_mild, i_wild)
+        p = 1-np.exp(-t_rate[t]*(i_mild+i_wild)/N[t])
+        assert 0 <= p <=1
         
-        for t in range(len(N)):
-            s, i_mild, i_wild = S[t], I_mild[t], I_wild[t]
-            p = 1-np.exp(-t_rate[t]*(i_mild+i_wild)/N[t])
-            assert 0 <= p <=1
-            
-            c = np.random.binomial(s, p)
-            c_mild = round_int(c*delta)
-            c_wild = c-c_mild
-            d_mild = np.random.binomial(i_mild, 1-np.exp(-gamma_mild))
-            d_wild = D_wild[t]
-            N_new.append(s+i_mild+i_wild+d_mild+np.sum(D_wild[:t])+np.sum(D_mild[:t-1]))
-            if t+1 < len(N):
-                if N[t+1] < N[t]:
-                    N[t+1] = N[t] 
-                # b <= s cause binom dist, so s >= 0
-                s = s - c + N[t+1] - N[t]
-                i_mild = i_mild + c_mild - d_mild
-                i_wild = i_wild + c_wild - d_wild
-                S.append(s)
-                I_mild.append(i_mild)
-                I_wild.append(i_wild)
-            
-            C.append(c)
-            D_mild.append(d_mild)
-            P.append(p)
-        if it < 9:
-            N = N_new
+        d_wild = int(D_wild[t])
+        d_mild = N[t] - s - i_mild - i_wild - np.sum(D_wild[:t]).astype(int) - np.sum(D_mild)
+        c_up, c_down = int(N[t+1]-N[t]), int(max(d_wild/(1-delta), d_mild/delta))
+        # print(N[t+1], c_up, c_down)
+        assert c_up >= c_down
+
+        c = np.random.binomial(s, p)
+        # try 100 times to simulate, if fails, just get something in range
+        for n_try in range(100):
+            if c_up >= c >= c_down:
+                break
+            else:
+                c = np.random.binomial(s, p)
+
+        if not (c_up >= c >= c_down):
+            c = np.random.choice(range(c_down, max(c_up, c_down+1)))
+
+        c_mild = round_int(c*delta)
+        c_wild = c-c_mild
+        
+        # b <= s cause binom dist, so s >= 0
+        s = s - c + N[t+1] - N[t]
+        i_mild = i_mild + c_mild - d_mild
+        i_wild = i_wild + c_wild - d_wild
+        S.append(s)
+        I_mild.append(i_mild)
+        I_wild.append(i_wild)
+        
+        C.append(c)
+        D_mild.append(d_mild)
+        P.append(p)
+
+    # last step
+    p = 1-np.exp(-t_rate[-1]*(I_mild[-1]+I_wild[-1])/N[-1])
+    c = np.random.binomial(S[-1], p)
+    d_mild = N[-1] - s - I_mild[-1] - I_wild[-1] - np.sum(D_wild[:-1]).astype(int) - np.sum(D_mild)
+    C.append(c)
+    P.append(p)
+    D_mild.append(d_mild)
 
     return [np.array(S), np.array(I_mild), np.array(I_wild), 
             np.array(C), np.array(D_mild), np.array(P), t_rate, np.array(N)]
 
 
 if __name__ == '__main__':
-    # S(0), E(0), I(0)
-    inits = [10, 200, 150]
+    import os
+    dirname = os.path.dirname(__file__)
+    filename = os.path.join(dirname, '../datasets/wuhan_china_mar_24.csv')
+    out_filename = os.path.join(dirname, '../output_china_lockdown_trial2.txt')
+
+    # beta, q, delta, gamma_mild, gamma_wild, k
+    bounds=[(0, np.inf), (0, np.inf), (0.05, 0.95), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
+    # params = [2, 0.05, 0.6, 0.15, 0.33, 0.2] # korea
+    # italy
+    # params = [2, 0.05, 0.8, 0.18, 0.33, 0.1] # italy
+    # n = 3
+    # offset, last_offset = 30, 1
+    # lockdown = 47
+
+    # china
+    params = [0.1, 0.05, 0.8, 0.18, 0.33, 0.1]
+    n = 5
+    offset, last_offset = 2, 12
+    lockdown = 3
+
+    N, D_wild = read_dataset(filename, n, offset, last_offset) # k = smoothing factor
+    N = round_int(N/params[5])
+    # Imild(0), Iwild(0)
+    inits = [0, 0]
     priors = [(2, 10)]*6 # no need to change
-    rand_walk_stds = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
-    t_ctrl = 17          # day on which control measurements were introduced
+    rand_walk_stds = [0.008, 0.001, 0.0005, 0.0005, 0.0005, 0.001] # no need to change
+    t_ctrl = lockdown-offset          # day on which control measurements were introduced
+    assert t_ctrl >= 0
     tau = 1000           # no need to change
     n_iter = 100000      # no need to change
-    n_burn_in = 30000    # no need to change
-    N, D_wild = read_dataset('../datasets/italy_mar_24.csv', n=7) # k = smoothing factor
-    bounds=[(0, np.inf), (0, np.inf), (0, 1), (0.07, 0.5), (0, 1), (0, 1)]
-    # beta, q, delta, gamma_mild, gamma_wild, k
-    # c_mild = delta * c_wild
-    # korea: params = [2.5, 0.05, 0.6, 0.07, 0.3, 5]
-    params = [1.2, 0.05, 0.85, 0.13, 0.33, 0.07]
-    N = round_int(N/params[5])
-
+    n_burn_in = 20000    # no need to change
+    save_freq = 500
+    
     
     params_mean, params_std, R0_conf, R0ts_conf = train(N, D_wild, inits, params, priors, 
-                                                        rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds
+                                                        rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds, save_freq
                                                        )[1:]
-    print(f"parameters (beta, q, g, gamma): mean: {params_mean}, std={params_std}\n\n"
-          +f"R0 80% confidence interval: {R0_conf}\n\n"
-          +f"R0[t] 80% confidence interval: {R0ts_conf}"
+    print(f"ouput file: {out_filename}")
+    print(f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
+          +f"R0 95% confidence interval: {R0_conf}\n\n"
+          +f"R0[t] 95% confidence interval: {R0ts_conf}"
         )
     low, high = R0ts_conf
-    line1, = plt.plot(range(len(N)), low, marker='o', linestyle='solid', linewidth=2, markersize=6, label='lower bound')
-    line2, = plt.plot(range(len(N)), high, marker='o', linestyle='solid', linewidth=2, markersize=6, label='upper bound')
+    
+    with open(out_filename, 'w') as out:
+        out.write(f"inits (imild0, iwild0): {inits}, rand_walk_stds:{rand_walk_stds}\n"
+                 +f"t_ctrl:{t_ctrl}, t_end:{len(N)}, n_iter:{n_iter}, n_burn_in:{n_burn_in}, save_freq:{save_freq}\n"
+                 +f"offset:{offset}, last_offset:{last_offset}, smoothing:{n}\n"
+                 +f"bounds:{bounds}\n"
+                 +f"param inits:{params}\n"
+                 +f"parameters (beta, q, delta, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
+                 +f"R0 95% confidence interval: {R0_conf}\n\n"
+                 +f"R0[t] 95% confidence interval: {R0ts_conf}\n"
+                 )
+    out.close()
+
+    mean = (low+high)/2
+    line1, = plt.plot(range(len(low)), low, marker='.', linestyle='dashed', linewidth=2, markersize=4, label='lower bound')
+    line2, = plt.plot(range(len(high)), high, marker='.', linestyle='dashed', linewidth=2, markersize=4, label='upper bound')
+    line3, = plt.plot(range(len(high)), mean, marker='o', linestyle='solid', linewidth=2, markersize=5, label='mean')
  
     plt.xlabel('day t', fontsize=12)
     plt.ylabel('R0_t', fontsize=12)
@@ -558,5 +612,5 @@ if __name__ == '__main__':
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
     # plt.ylim(0, 10)
-    plt.legend(handles=[line1, line2], fontsize=12)
+    plt.legend(handles=[line1, line2, line3], fontsize=12)
     plt.show()
