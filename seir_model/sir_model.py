@@ -547,29 +547,40 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
 if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
-    filename = os.path.join(dirname, '../datasets/new_york_mar_30.csv')
-    out_filename = os.path.join(dirname, '../output_ny_start_mar2_lockdown_mar29.txt')
 
     # beta, q, delta, gamma_mild, gamma_wild, k
     bounds=[(0, np.inf), (0, np.inf), (0.05, 0.95), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
     # params = [2, 0.05, 0.6, 0.15, 0.33, 0.2] # korea
+    
     # italy
-    # params = [2, 0.05, 0.8, 0.18, 0.33, 0.1] # italy
-    # n = 3
-    # offset, last_offset = 30, 1
-    # lockdown = 47
+    filename = os.path.join(dirname, '../datasets/italy_mar_30.csv')
+    out_filename = os.path.join(dirname, '../output_italy_start_feb19_lockdown_mar9.txt')
+    params = [0.8, 0.05, 0.8, 0.18, 0.33, 0.1] # italy
+    n = 3
+    offset, last_offset = 28, 1
+    lockdown = 47
+    rand_walk_stds = [0.009, 0.001, 0.001, 0.001, 0.001, 0.001]
 
-    # # china
+    # korea
+    filename = os.path.join(dirname, '../datasets/korea_mar_30.csv')
+    out_filename = os.path.join(dirname, '../output_korea_start_feb19_lockdown_feb26.txt')
+    params = [2, 0.05, 0.6, 0.15, 0.33, 0.2]
+    n = 3
+    offset, last_offset = 30, 1
+    lockdown = 37
+    rand_walk_stds = [0.01, 0.001, 0.001, 0.001, 0.001, 0.001]
+    
+    # wuhan
     # params = [0.5, 0.001, 0.8, 0.18, 0.33, 0.1]
     # n = 5
     # offset, last_offset = 2, 12
     # lockdown = 3
 
     # new york
-    params = [0.7, 0.001, 0.8, 0.18, 0.33, 0.18]
-    n = 5
-    offset, last_offset = 40, 1
-    lockdown = 66
+    # params = [0.6, 0.001, 0.8, 0.18, 0.33, 0.18]
+    # n = 5
+    # offset, last_offset = 40, 1
+    # lockdown = 50
 
     # germany
     # params = [0.7, 0.001, 0.6, 0.18, 0.33, 0.22]
@@ -583,12 +594,37 @@ if __name__ == '__main__':
     # offset, last_offset = 43, 1
     # lockdown = 57
 
+    # turkey
+    # filename = os.path.join(dirname, '../datasets/china_mar_30.csv')
+    # out_filename = os.path.join(dirname, '../output_china_start_jan23_lockdown_none.txt')
+    # params = [0.7, 0.001, 0.8, 0.18, 0.33, 0.22]
+    # n = 5
+    # offset, last_offset = 49, 1
+    # lockdown = 66
+
+    # china
+    # filename = os.path.join(dirname, '../datasets/china_mar_30.csv')
+    # out_filename = os.path.join(dirname, '../output_china_start_jan23_lockdown_jan28.txt')
+    # params = [0.8, 0.001, 0.8, 0.18, 0.33, 0.1]
+    # n = 5
+    # offset, last_offset = 1, 1
+    # lockdown = 6
+    # rand_walk_stds = [0.008, 0.0005, 0.0005, 0.001, 0.001, 0.0007] # no need to change
+
+    # us
+    # filename = os.path.join(dirname, '../datasets/us_mar_30.csv')
+    # out_filename = os.path.join(dirname, '../output_us_start_feb25_lockdown_none.txt')
+    # params = [0.8, 0.001, 0.8, 0.18, 0.33, 0.1]
+    # n = 5
+    # offset, last_offset = 34, 1
+    # lockdown = 66
+    # rand_walk_stds = [0.008, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
+
     N, D_wild = read_dataset(filename, n, offset, last_offset) # k = smoothing factor
     N = round_int(N/params[5])
     # Imild(0), Iwild(0)
     inits = [0, 0]
     priors = [(2, 10)]*6 # no need to change
-    rand_walk_stds = [0.008, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
     t_ctrl = lockdown-offset          # day on which control measurements were introduced
     assert t_ctrl >= 0
     tau = 1000           # no need to change
