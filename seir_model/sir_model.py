@@ -141,7 +141,7 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
             saved_params.append(params)
             saved_R0ts.append(R0t)
 
-        if i % 20 == 0:
+        if i % 5 == 0:
             beta, q, delta, gamma_mild, gamma_wild, k = np.round(params, 5)
             params_dict = {'beta': beta, 'q': q, 'delta': delta, 
                            'gamma_mild':gamma_mild, 'gamma_wild':gamma_wild, 'k': k,
@@ -414,7 +414,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     old_k = k    
     data = [S, I_mild, I_wild, P, N]
 
-    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn)
+    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn, burn_in=30)
     beta, q, delta, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
     # R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild)) * S/N
@@ -505,7 +505,10 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
         d_mild = N[t] - s - i_mild - i_wild - np.sum(D_wild[:t]).astype(int) - np.sum(D_mild)
         c_up, c_down = int(N[t+1]-N[t]), int(max(d_wild/(1-delta), d_mild/delta))
         # print(N[t+1], c_up, c_down)
+        # print(N[t+1], d_mild)
+        assert d_mild >= 0
         assert c_up >= c_down
+        assert c_down >= 0
 
         c = np.random.binomial(s, p)
         # try 100 times to simulate, if fails, just get something in range
@@ -516,7 +519,14 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
                 c = np.random.binomial(s, p)
 
         if not (c_up >= c >= c_down):
-            c = np.random.choice(range(c_down, max(c_up, c_down+1)))
+            mu = s * (p+1e-6) 
+            sigma = s * (p+1e-6) * (1-p)
+            if mu > c_up:
+                c = c_up
+            elif mu < c_down:
+                c = c_down
+
+            # c = np.random.choice(range(c_down, max(c_up, c_down+1)))
 
         c_mild = round_int(c*delta)
         c_wild = c-c_mild
@@ -549,32 +559,30 @@ if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
     default_in_filename = os.path.join(dirname, '../datasets/italy_mar_30.csv')
-    default_out_filename = os.path.join(dirname, '../output_italy_start_feb19_lockdown_mar9.txt')
+    default_out_filename = os.path.join(dirname, '../output_italy_start_feb19_lockdown_mar9trial5.txt')
 
     parser = argparse.ArgumentParser(description='Learn an SIR model for the COVID-19 infected data.')
     parser.add_argument('infile', type=str, help='Directory for the location of the input file',
                         default=default_in_filename, nargs='?')
     parser.add_argument('outfile', type=str, help='Directory for the location of the input file',
-                        default=default_in_filename, nargs='?')
-    parser.add_argument('params', type=float, default=(0.8, 0.05, 0.8, 0.18, 0.33, 0.1), nargs='?')
+                        default=default_out_filename, nargs='?')
+    parser.add_argument('params', type=float, default=(0.4, 0.01, 0.25, 0.18, 0.33, 0.3), nargs='?')
     parser.add_argument('n', type=int, default=3, nargs='?')
     parser.add_argument('offset', type=int, default=28, nargs='?')
     parser.add_argument('last_offset', type=int, default=1, nargs='?')
     parser.add_argument('lockdown', type=int, default=47, nargs='?')
-    parser.add_argument('rand_walk_stds', type=float, default=(0.009, 0.001, 0.001, 0.001, 0.001, 0.001), nargs='?')
+    parser.add_argument('rand_walk_stds', type=float, default=(0.01, 0.0005, 0.05, 0.001, 0.001, 0.001), nargs='?')
 
     # beta, q, delta, gamma_mild, gamma_wild, k
-    bounds=[(0, np.inf), (0, np.inf), (0.05, 0.95), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
+    bounds=[(0, 5), (0, np.inf), (0.05, 0.95), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
     # params = [2, 0.05, 0.6, 0.15, 0.33, 0.2] # korea
     
     # korea
-    filename = os.path.join(dirname, '../datasets/korea_mar_30.csv')
-    out_filename = os.path.join(dirname, '../output_korea_start_feb19_lockdown_feb26.txt')
-    params = [2, 0.05, 0.6, 0.15, 0.33, 0.2]
-    n = 3
-    offset, last_offset = 30, 1
-    lockdown = 37
-    rand_walk_stds = [0.01, 0.001, 0.001, 0.001, 0.001, 0.001]
+    # params = [2, 0.05, 0.6, 0.15, 0.33, 0.2]
+    # n = 3
+    # offset, last_offset = 30, 1
+    # lockdown = 37 # 
+    # rand_walk_stds = [0.01, 0.002, 0.002, 0.002, 0.002, 0.002] # [0.01, 0.001, 0.001, 0.001, 0.001, 0.001]
 
     # italy
     args = parser.parse_args()
@@ -640,14 +648,15 @@ if __name__ == '__main__':
     N, D_wild = read_dataset(filename, n, offset, last_offset) # k = smoothing factor
     N = round_int(N/params[5])
     # Imild(0), Iwild(0)
-    inits = [0, 0]
+    delta = params[2]
+    inits = [int(N[0]*.01), int(N[0]*.01)]
     priors = [(2, 10)]*6 # no need to change
     t_ctrl = lockdown-offset          # day on which control measurements were introduced
     assert t_ctrl >= 0
     tau = 1000           # no need to change
-    n_iter = 100000      # no need to change
-    n_burn_in = 20000    # no need to change
-    save_freq = 500
+    n_iter = 1000      # no need to change
+    n_burn_in = 200    # no need to change
+    save_freq = 50
     
     
     params_mean, params_std, R0_conf, R0ts_conf = train(N, D_wild, inits, params, priors, 
