@@ -558,20 +558,20 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
 if __name__ == '__main__':
     import os
     dirname = os.path.dirname(__file__)
-    default_in_filename = os.path.join(dirname, '../datasets/italy_mar_30.csv')
-    default_out_filename = os.path.join(dirname, '../output_italy_start_feb19_lockdown_mar9trial5.txt')
+    default_in_filename = os.path.join(dirname, '../datasets/korea_mar_30.csv')
+    default_out_filename = os.path.join(dirname, '../output_korea_start_feb19_lockdown_feb26trial3.txt')
 
     parser = argparse.ArgumentParser(description='Learn an SIR model for the COVID-19 infected data.')
     parser.add_argument('infile', type=str, help='Directory for the location of the input file',
                         default=default_in_filename, nargs='?')
     parser.add_argument('outfile', type=str, help='Directory for the location of the input file',
                         default=default_out_filename, nargs='?')
-    parser.add_argument('params', type=float, default=(0.4, 0.01, 0.25, 0.18, 0.33, 0.3), nargs='?')
+    parser.add_argument('params', type=float, default=(0.2, 0.05, 0.4, 0.18, 0.33, 0.25), nargs='?')
     parser.add_argument('n', type=int, default=3, nargs='?')
-    parser.add_argument('offset', type=int, default=28, nargs='?')
+    parser.add_argument('offset', type=int, default=30, nargs='?')
     parser.add_argument('last_offset', type=int, default=1, nargs='?')
-    parser.add_argument('lockdown', type=int, default=47, nargs='?')
-    parser.add_argument('rand_walk_stds', type=float, default=(0.01, 0.0005, 0.05, 0.001, 0.001, 0.001), nargs='?')
+    parser.add_argument('lockdown', type=int, default=37, nargs='?')
+    parser.add_argument('rand_walk_stds', type=float, default=(0.01, 0.005, 0.01, 0.005, 0.005, 0.005), nargs='?')
 
     # beta, q, delta, gamma_mild, gamma_wild, k
     bounds=[(0, 5), (0, np.inf), (0.05, 0.95), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
@@ -649,7 +649,7 @@ if __name__ == '__main__':
     N = round_int(N/params[5])
     # Imild(0), Iwild(0)
     delta = params[2]
-    inits = [int(N[0]*.01), int(N[0]*.01)]
+    inits = [0, 0]
     priors = [(2, 10)]*6 # no need to change
     t_ctrl = lockdown-offset          # day on which control measurements were introduced
     assert t_ctrl >= 0
