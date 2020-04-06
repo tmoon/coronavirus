@@ -267,7 +267,7 @@ def sample_B(B, variables, inits, params, t_ctrl, epsilon):
     S, E, I_mild, I_wild, C, P, N = variables
     
     data = [S, E]
-    B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=10)
+    B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=30)
     S, E = data
 
     return B, S, E, log_prob_new, log_prob_old
@@ -307,7 +307,7 @@ def sample_C(C, variables, inits, params, t_ctrl, epsilon):
     E, I_mild, I_wild, D_mild, D_wild, B, N, P = variables
     
     data = [E, I_mild, I_wild, P]
-    C, data, log_prob_new, log_prob_old = metropolis_hastings(C, data, fn, proposal, conditions_fn, burn_in=10)
+    C, data, log_prob_new, log_prob_old = metropolis_hastings(C, data, fn, proposal, conditions_fn, burn_in=30)
     E, I_mild, I_wild, P = data
 
     return C, E, I_mild, I_wild, P, log_prob_new, log_prob_old
@@ -346,7 +346,7 @@ def sample_D_mild(D_mild, variables, inits, params, t_ctrl, epsilon):
     beta, q, delta, rho, gamma_mild, gamma_wild, k = params
     I_mild, I_wild, C, N = variables
     data = [I_mild]
-    D_mild, data, log_prob_new, log_prob_old = metropolis_hastings(D_mild, data, fn, proposal, conditions_fn, burn_in=10)
+    D_mild, data, log_prob_new, log_prob_old = metropolis_hastings(D_mild, data, fn, proposal, conditions_fn, burn_in=30)
     I_mild = data[0]
     P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)
     return [D_mild] + data + [P, log_prob_new, log_prob_old]
@@ -613,26 +613,6 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
             np.array(B), np.array(C), np.array(D_mild), np.array(P), t_rate, np.array(N)]
 
 
-if __name__ == '__main__':
-    import os
-    dirname = os.path.dirname(__file__)
-    default_in_filename = os.path.join(dirname, '../datasets/korea_mar_30.csv')
-    default_out_filename = os.path.join(dirname, '../output_korea_start_feb19_lockdown_feb26trial3.txt')
-
-    parser = argparse.ArgumentParser(description='Learn an SIR model for the COVID-19 infected data.')
-    parser.add_argument('infile', type=str, help='Directory for the location of the input file',
-                        default=default_in_filename, nargs='?')
-    parser.add_argument('outfile', type=str, help='Directory for the location of the input file',
-                        default=default_out_filename, nargs='?')
-    parser.add_argument('params', type=float, default=(0.2, 0.05, 0.4, 0.2, 0.18, 0.33, 0.25), nargs='?')
-    parser.add_argument('n', type=int, default=3, nargs='?')
-    parser.add_argument('offset', type=int, default=30, nargs='?')
-    parser.add_argument('last_offset', type=int, default=1, nargs='?')
-    parser.add_argument('lockdown', type=int, default=37, nargs='?')
-    parser.add_argument('rand_walk_stds', type=float, default=(0.01, 0.005, 0.01, 0.005, 0.005, 0.005, 0.005), nargs='?')
-
-    # beta, q, delta, rho, gamma_mild, gamma_wild, k
-    bounds=[(0, 5), (0, np.inf), (0.05, 0.95), (0.05, 0.5), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
     # params = [2, 0.05, 0.6, 0.15, 0.33, 0.2] # korea
     
     # korea
@@ -643,16 +623,6 @@ if __name__ == '__main__':
     # rand_walk_stds = [0.01, 0.002, 0.002, 0.002, 0.002, 0.002] # [0.01, 0.001, 0.001, 0.001, 0.001, 0.001]
 
     # italy
-    args = parser.parse_args()
-    params = list(args.params) # italy
-    rand_walk_stds = list(args.rand_walk_stds)
-    assert len(params) == 7 and len(rand_walk_stds) == 7, "Need all parameters and their random walk stds"
-    n = args.n
-    offset, last_offset = args.offset, args.last_offset
-    lockdown = args.lockdown
-    filename = args.infile
-    out_filename = args.outfile
-
     # wuhan
     # params = [0.5, 0.001, 0.8, 0.18, 0.33, 0.1]
     # n = 5
@@ -703,7 +673,44 @@ if __name__ == '__main__':
     # lockdown = 66
     # rand_walk_stds = [0.008, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
 
-    N, D_wild = read_dataset(filename, n, offset, last_offset) # k = smoothing factor
+
+if __name__ == '__main__':
+    import os
+    dirname = os.path.dirname(__file__)
+    default_in_filename = '../datasets/korea_mar_30.csv'
+    default_out_filename = '../output_korea_start_feb19_lockdown_feb26trial3.txt'
+
+    parser = argparse.ArgumentParser(description='Learn an SEIR model for the COVID-19 infected data.')
+    parser.add_argument('--infile', type=str, help='Directory for the location of the input file',
+                        default=default_in_filename, nargs='?')
+    parser.add_argument('--outfile', type=str, help='Directory for the location of the input file',
+                        default=default_out_filename, nargs='?')
+    parser.add_argument('--params', type=float, default=(0.2, 0.05, 0.4, 0.2, 0.18, 0.33, 0.25), nargs='?', 
+                        help="inits for beta, q, delta, rho, gamma_mild, gamma_wild, k")
+    parser.add_argument('--n', type=int, default=3, nargs='?', help="number of entries to take rolling mean over")
+    parser.add_argument('--offset', type=int, default=30, nargs='?', 
+                        help="number of days >=1 to exclude in the beginning of the dataset")
+    parser.add_argument('--last_offset', type=int, default=1, nargs='?', help="number of days >=1 to exclude at the end of dataset")
+    parser.add_argument('--lockdown', type=int, default=37, nargs='?', help="day on which lock down was imposed")
+    parser.add_argument('--n_iter', type=int, default=10000, nargs='?', help="number of iterations")
+    parser.add_argument('--n_burn_in', type=int, default=5000, nargs='?', help="burn in period for MCMC")
+    parser.add_argument('--save_freq', type=int, default=200, nargs='?', help="how often to save samples after burn in")
+    parser.add_argument('--rand_walk_stds', type=float, default=(0.01, 0.005, 0.01, 0.005, 0.005, 0.005, 0.01), nargs='?', 
+                       help="stds for gaussian random walk in MCMC (one for each param)")
+
+    # beta, q, delta, rho, gamma_mild, gamma_wild, k
+    bounds=[(0, 5), (0, np.inf), (0.05, 0.95), (0.14, 0.25), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
+    args = parser.parse_args()
+    params = list(args.params) # italy
+    rand_walk_stds = list(args.rand_walk_stds)
+    assert len(params) == 7 and len(rand_walk_stds) == 7, "Need all parameters and their random walk stds"
+    n = args.n
+    offset, last_offset = args.offset, args.last_offset
+    lockdown = args.lockdown
+    in_filename = os.path.join(dirname, args.infile)
+    out_filename = os.path.join(dirname, args.outfile)
+
+    N, D_wild = read_dataset(in_filename, n, offset, last_offset) # k = smoothing factor
     N = round_int(N/params[6])
     # Imild(0), Iwild(0)
     delta = params[2]
@@ -711,15 +718,17 @@ if __name__ == '__main__':
     priors = [(2, 10)]*len(params) # no need to change
     t_ctrl = lockdown-offset          # day on which control measurements were introduced
     assert t_ctrl >= 0
+    
     tau = 1000           # no need to change
-    n_iter = 1000      # no need to change
-    n_burn_in = 200    # no need to change
-    save_freq = 50
+    n_iter = args.n_iter      # no need to change
+    n_burn_in = args.n_burn_in    # no need to change
+    save_freq = args.save_freq
     
     
     params_mean, params_std, R0_conf, R0ts_conf = train(N, D_wild, inits, params, priors, 
                                                         rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds, save_freq
                                                        )[1:]
+    print(f"\nFINAL RESULTS\n\ninput file{in_filename}")
     print(f"ouput file: {out_filename}")
     print(f"parameters (beta, q, delta, rho, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
           +f"R0 95% confidence interval: {R0_conf}\n\n"
@@ -728,7 +737,10 @@ if __name__ == '__main__':
     low, high = R0ts_conf
     
     with open(out_filename, 'w') as out:
-        out.write(f"inits (imild0, iwild0): {inits}, rand_walk_stds:{rand_walk_stds}\n"
+        out.write("SEIR MODEL FOR R0t PREDICTION\n---   ---   ---   ---   ---\n"
+                 +f"dataset name: {in_filename}\n"
+                 +f"output filename: {out_filename}\n\n"
+                 +f"inits (imild0, iwild0): {inits}, rand_walk_stds:{rand_walk_stds}\n"
                  +f"t_ctrl:{t_ctrl}, t_end:{len(N)}, n_iter:{n_iter}, n_burn_in:{n_burn_in}, save_freq:{save_freq}\n"
                  +f"offset:{offset}, last_offset:{last_offset}, smoothing:{n}\n"
                  +f"bounds:{bounds}\n"
