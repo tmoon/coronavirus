@@ -685,7 +685,7 @@ if __name__ == '__main__':
                         default=default_in_filename, nargs='?')
     parser.add_argument('--outfile', type=str, help='Directory for the location of the input file',
                         default=default_out_filename, nargs='?')
-    parser.add_argument('--params', type=float, default=(0.2, 0.05, 0.4, 0.2, 0.18, 0.33, 0.25), nargs='?', 
+    parser.add_argument('--params', type=str, default="0.2, 0.05, 0.4, 0.2, 0.18, 0.33, 0.25", nargs='?', 
                         help="inits for beta, q, delta, rho, gamma_mild, gamma_wild, k")
     parser.add_argument('--n', type=int, default=3, nargs='?', help="number of entries to take rolling mean over")
     parser.add_argument('--offset', type=int, default=30, nargs='?', 
@@ -695,14 +695,14 @@ if __name__ == '__main__':
     parser.add_argument('--n_iter', type=int, default=10000, nargs='?', help="number of iterations")
     parser.add_argument('--n_burn_in', type=int, default=5000, nargs='?', help="burn in period for MCMC")
     parser.add_argument('--save_freq', type=int, default=200, nargs='?', help="how often to save samples after burn in")
-    parser.add_argument('--rand_walk_stds', type=float, default=(0.01, 0.005, 0.01, 0.005, 0.005, 0.005, 0.01), nargs='?', 
+    parser.add_argument('--rand_walk_stds', type=str, default="0.01, 0.005, 0.005, 0.005, 0.005, 0.005, 0.01", nargs='?', 
                        help="stds for gaussian random walk in MCMC (one for each param)")
 
     # beta, q, delta, rho, gamma_mild, gamma_wild, k
     bounds=[(0, 5), (0, np.inf), (0.05, 0.95), (0.14, 0.25), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
     args = parser.parse_args()
-    params = list(args.params) # italy
-    rand_walk_stds = list(args.rand_walk_stds)
+    params = [float(param) for param in args.params.split(',')] # italy
+    rand_walk_stds = [float(std) for std in args.rand_walk_stds.split(',')]
     assert len(params) == 7 and len(rand_walk_stds) == 7, "Need all parameters and their random walk stds"
     n = args.n
     offset, last_offset = args.offset, args.last_offset
