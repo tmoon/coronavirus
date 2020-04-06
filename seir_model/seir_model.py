@@ -267,7 +267,7 @@ def sample_B(B, variables, inits, params, t_ctrl, epsilon):
     S, E, I_mild, I_wild, C, P, N = variables
     
     data = [S, E]
-    B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=30)
+    B, data, log_prob_new, log_prob_old = metropolis_hastings(B, data, fn, proposal, conditions_fn, burn_in=10)
     S, E = data
 
     return B, S, E, log_prob_new, log_prob_old
@@ -307,7 +307,7 @@ def sample_C(C, variables, inits, params, t_ctrl, epsilon):
     E, I_mild, I_wild, D_mild, D_wild, B, N, P = variables
     
     data = [E, I_mild, I_wild, P]
-    C, data, log_prob_new, log_prob_old = metropolis_hastings(C, data, fn, proposal, conditions_fn, burn_in=30)
+    C, data, log_prob_new, log_prob_old = metropolis_hastings(C, data, fn, proposal, conditions_fn, burn_in=10)
     E, I_mild, I_wild, P = data
 
     return C, E, I_mild, I_wild, P, log_prob_new, log_prob_old
@@ -346,7 +346,7 @@ def sample_D_mild(D_mild, variables, inits, params, t_ctrl, epsilon):
     beta, q, delta, rho, gamma_mild, gamma_wild, k = params
     I_mild, I_wild, C, N = variables
     data = [I_mild]
-    D_mild, data, log_prob_new, log_prob_old = metropolis_hastings(D_mild, data, fn, proposal, conditions_fn, burn_in=30)
+    D_mild, data, log_prob_new, log_prob_old = metropolis_hastings(D_mild, data, fn, proposal, conditions_fn, burn_in=10)
     I_mild = data[0]
     P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)
     return [D_mild] + data + [P, log_prob_new, log_prob_old]
@@ -451,7 +451,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     old_k = k    
     data = [S, E, I_mild, I_wild, P, N]
 
-    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn, burn_in=20)
+    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn, burn_in=5)
     beta, q, delta, rho, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
     # R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild)) * S/N
@@ -623,6 +623,11 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
     # rand_walk_stds = [0.01, 0.002, 0.002, 0.002, 0.002, 0.002] # [0.01, 0.001, 0.001, 0.001, 0.001, 0.001]
 
     # italy
+    # params = [0.5, 0.001, 0.8, 0.18, 0.33, 0.1]
+    # n = 5
+    # offset, last_offset = 30, 1
+    # lockdown = 47
+
     # wuhan
     # params = [0.5, 0.001, 0.8, 0.18, 0.33, 0.1]
     # n = 5
@@ -633,7 +638,7 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
     # params = [0.6, 0.001, 0.8, 0.18, 0.33, 0.18]
     # n = 5
     # offset, last_offset = 40, 1
-    # lockdown = 50
+    # lockdown = 5
 
     # germany
     # params = [0.7, 0.001, 0.6, 0.18, 0.33, 0.22]
