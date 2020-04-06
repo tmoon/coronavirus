@@ -451,7 +451,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     old_k = k    
     data = [S, E, I_mild, I_wild, P, N]
 
-    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn, burn_in=10)
+    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn, burn_in=20)
     beta, q, delta, rho, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
     # R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild)) * S/N
@@ -685,7 +685,7 @@ if __name__ == '__main__':
                         default=default_in_filename, nargs='?')
     parser.add_argument('--outfile', type=str, help='Directory for the location of the input file',
                         default=default_out_filename, nargs='?')
-    parser.add_argument('--params', type=str, default="0.2, 0.05, 0.4, 0.2, 0.18, 0.33, 0.25", nargs='?', 
+    parser.add_argument('--params', type=str, default="0.2, 0.05, 0.33, 0.2, 0.18, 0.33, 0.25", nargs='?', 
                         help="inits for beta, q, delta, rho, gamma_mild, gamma_wild, k")
     parser.add_argument('--n', type=int, default=3, nargs='?', help="number of entries to take rolling mean over")
     parser.add_argument('--offset', type=int, default=30, nargs='?', 
@@ -699,7 +699,7 @@ if __name__ == '__main__':
                        help="stds for gaussian random walk in MCMC (one for each param)")
 
     # beta, q, delta, rho, gamma_mild, gamma_wild, k
-    bounds=[(0, 5), (0, np.inf), (0.05, 0.95), (0.14, 0.25), (0.05, 0.25), (0.07, 0.5), (0.02, 1)]
+    bounds=[(0, 2), (0, np.inf), (0.08, 0.95), (0.14, 0.25), (0.08, 0.33), (0.14, 0.5), (0.02, 1)]
     args = parser.parse_args()
     params = [float(param) for param in args.params.split(',')] # italy
     rand_walk_stds = [float(std) for std in args.rand_walk_stds.split(',')]
