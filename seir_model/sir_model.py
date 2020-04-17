@@ -614,7 +614,7 @@ if __name__ == '__main__':
     parser.add_argument('--outfile', type=str, help='Directory for the location of the input file',
                         default=default_out_filename, nargs='?')
     # beta, q, delta, gamma_mild, gamma_wild, k, kctrl
-    parser.add_argument('--params', type=str, default="0.5, 0.05, 0.5, 0.18, 0.3, 0.1", nargs='?', 
+    parser.add_argument('--params', type=str, default="0.5, 0.01, 0.5, 0.18, 0.3, 0.1", nargs='?', 
                         help="inits for beta, q, delta, gamma_mild, gamma_wild, k")
     parser.add_argument('--inits', type=str, default="1000, 1000", nargs='?', help="initial values for imild0 and iwild0")
     parser.add_argument('--n', type=int, default=3, nargs='?', help="number of entries to take rolling mean over")
@@ -629,7 +629,7 @@ if __name__ == '__main__':
                        help="stds for gaussian random walk in MCMC (one for each param)")
 
     # beta, q, delta, gamma_mild, gamma_wild, k, kctrl
-    bounds=[(0, 2), (0, np.inf), (0.08, 0.92), (0.08, 0.5), (0.14, 0.5), (0, 1)]
+    bounds=[(0, 2), (0, np.inf), (0.08, 0.92), (0.05, 0.5), (0.05, 0.5), (0, 1)]
     args = parser.parse_args()
     params = [float(param) for param in args.params.split(',')] # italy
     rand_walk_stds = [float(std) for std in args.rand_walk_stds.split(',')]
