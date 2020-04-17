@@ -16,4 +16,4 @@ Which would run the model on a bunch of default parameters. To modify the parame
 * `--lockdown` : The day on which lockdown was implemented. (default: 37, *should be changed*).
 * `--rand_walk_stds` : The standard deviation of the random walks that is used to learn each parameter in MCMC. Defaults to `(0.01, 0.005, 0.01, 0.005, 0.005, 0.005)`.
 
-For different countries, we recommend changing the `last_offset, offset,` and `lockdown`. You could 
+For different countries, we recommend changing the `last_offset, offset,` and `lockdown`. You could keep the `params` and `random_walk_stds` as is.
