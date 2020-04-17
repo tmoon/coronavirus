@@ -665,7 +665,7 @@ if __name__ == '__main__':
     print(f"ouput file: {out_filename}")
     print(f"param inits: {params}")
     param_names = ["beta", "q", "delta", "gamma_mild", "gamma_wild", "k"]
-    print(f"parameters mean: {zip(param_names, params_mean)}\nparameters std={zip(param_names, params_std)}\n\n"
+    print(f"parameters mean: {dict(zip(param_names, params_mean))}\nparameters std={dict(zip(param_names, params_std))}\n\n"
           +f"R0 95% confidence interval: {R0_conf}\n\n"
           +f"R0[t] 95% confidence interval: {R0ts_conf}"
         )
