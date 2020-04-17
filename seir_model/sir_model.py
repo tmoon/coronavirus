@@ -520,7 +520,7 @@ def initialize(inits, params, N, D_wild, t_ctrl):
         s = s - c + N[t+1] - N[t]
         i_mild = i_mild + c_mild - d_mild
         i_wild = i_wild + c_wild - d_wild
-        print(d_mild, d_wild, i_wild)
+        print(f"t: {t}, D_mild[t]: {d_mild}, D_wild[t]: {d_wild}, I_wild[t]: {i_wild}")
         assert i_wild >= 0
         S.append(s)
         I_mild.append(i_mild)
@@ -616,13 +616,14 @@ if __name__ == '__main__':
     # beta, q, delta, gamma_mild, gamma_wild, k, kctrl
     parser.add_argument('--params', type=str, default="0.5, 0.05, 0.5, 0.18, 0.3, 0.1", nargs='?', 
                         help="inits for beta, q, delta, gamma_mild, gamma_wild, k")
+    parser.add_argument('--inits', type=str, default="1000, 1000", nargs='?', help="initial values for imild0 and iwild0")
     parser.add_argument('--n', type=int, default=3, nargs='?', help="number of entries to take rolling mean over")
     parser.add_argument('--offset', type=int, default=30, nargs='?', 
                         help="number of days >=1 to exclude in the beginning of the dataset")
     parser.add_argument('--last_offset', type=int, default=1, nargs='?', help="number of days >=1 to exclude at the end of dataset")
     parser.add_argument('--lockdown', type=int, default=37, nargs='?', help="day on which lock down was imposed")
-    parser.add_argument('--n_iter', type=int, default=10000, nargs='?', help="number of iterations")
-    parser.add_argument('--n_burn_in', type=int, default=3000, nargs='?', help="burn in period for MCMC")
+    parser.add_argument('--n_iter', type=int, default=12000, nargs='?', help="number of iterations")
+    parser.add_argument('--n_burn_in', type=int, default=5000, nargs='?', help="burn in period for MCMC")
     parser.add_argument('--save_freq', type=int, default=200, nargs='?', help="how often to save samples after burn in")
     parser.add_argument('--rand_walk_stds', type=str, default="0.005, 0.001, 0.005, 0.001, 0.001, 0.002", nargs='?', 
                        help="stds for gaussian random walk in MCMC (one for each param)")
@@ -648,7 +649,7 @@ if __name__ == '__main__':
 
     # Imild(0), Iwild(0)
     delta = params[2]
-    inits = [1000, 1000]
+    inits = [int(init) for init in args.inits.split(',')]
     priors = [(2, 10)]*len(params) # no need to change
     
     tau = 1000           # no need to change
