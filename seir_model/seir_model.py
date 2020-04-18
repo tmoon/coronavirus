@@ -7,7 +7,7 @@ register_matplotlib_converters()
 from scipy import stats, optimize, interpolate
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-
+import os
 import time
 from datetime import datetime
 
@@ -459,7 +459,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     old_k = k
     data = [S, E, I_mild, I_wild, P, N]
 
-    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn, burn_in=30)
+    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn, burn_in=1)
     beta, q, delta, rho, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
     # R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild)) * S/N
@@ -675,11 +675,31 @@ def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
     # rand_walk_stds = [0.008, 0.001, 0.001, 0.001, 0.001, 0.001] # no need to change
 
 
-if __name__ == '__main__':
-    import os
-    dirname = os.path.dirname(__file__)
+def plot_R0ts(R0ts_mean, R0ts_std, CI_FACTOR, out_filename):
+    plt.style.use('seaborn-darkgrid')
+    line, = plt.plot(dates[1:], R0ts_mean[1:], marker='o', linestyle='solid', linewidth=2, markersize=5, label='Effective R0(t)')
+    plt.fill_between(dates[1:], R0ts_mean[1:]-CI_FACTOR*R0ts_std[1:], R0ts_mean[1:]+CI_FACTOR*R0ts_std[1:],facecolor='C0',alpha=0.2)
+    point = plt.stem([lockdown], [R0ts_mean[t_ctrl]], linefmt='C1-', markerfmt='C1o', label='lockdown', use_line_collection=True)
+    
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+    plt.legend(handles=[line, point], fontsize=12)
+    plt.title(args.infile, fontsize=16)
+    
+    ax = plt.gca()
+    ax.tick_params(axis='both', which='major', width=1.4, length=7, direction='out')
+    ax.tick_params(axis='both', which='minor', width=1.1, length=4, direction='in')
+    ax.xaxis.set_major_locator(mdates.DayLocator(interval=7))
+    ax.xaxis.set_minor_locator(mdates.DayLocator(interval=1))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
+    
+    plt.gcf().set_size_inches(13, 8)
+    plt.savefig(out_filename[:-4]+".png", dpi=200)
+    plt.show()
+
+def parse_arguments():
     default_in_dir = '../datasets'
-    default_out_dir = '../output'
+    default_out_dir = 'output'
     default_in_filename = 'korea_april_16.csv'
     if not os.path.exists(default_out_dir):
         os.makedirs(default_out_dir)
@@ -691,23 +711,29 @@ if __name__ == '__main__':
                         default=default_in_dir, nargs='?')
     parser.add_argument('--outdir', type=str, help='Directory for the location of the output file',
                         default=default_out_dir, nargs='?')
-    parser.add_argument('--inits', type=str, default="1000, 5, 6", nargs='?', help="inits e0, imild0, iwild0")
-    parser.add_argument('--params', type=str, default="2, 0.02, 0.5, 0.6, 0.12, 0.2, 0.2", nargs='?', 
+    parser.add_argument('--inits', type=str, default="500, 100, 100", nargs='?', help="inits e0, imild0, iwild0")
+    parser.add_argument('--params', type=str, default="1.9, 0.01, 0.5, 0.5, 0.12, 0.2, 0.2", nargs='?', 
                         help="inits for beta, q, delta, rho, gamma_mild, gamma_wild, k")
     parser.add_argument('--n', type=int, default=3, nargs='?', help="number of entries to take rolling mean over")
-    parser.add_argument('--start', type=str, default='2020-02-18', nargs='?', 
+    parser.add_argument('--start', type=str, default='2020-02-19', nargs='?', 
                         help="first day in the model in YYYY-MM-DD format")
     parser.add_argument('--end', type=str, default='2020-04-15', nargs='?', help="last day in the model in YYYY-MM-DD format")
     parser.add_argument('--lockdown', type=str, default='2020-02-28', nargs='?', 
                         help="the day on which national lockdown was imposed in YYYY-MM-DD format")
-    parser.add_argument('--n_iter', type=int, default=2000, nargs='?', help="number of iterations")
-    parser.add_argument('--n_burn_in', type=int, default=1000, nargs='?', help="burn in period for MCMC")
-    parser.add_argument('--save_freq', type=int, default=50, nargs='?', help="how often to save samples after burn in")
+    parser.add_argument('--n_iter', type=int, default=20, nargs='?', help="number of iterations")
+    parser.add_argument('--n_burn_in', type=int, default=10, nargs='?', help="burn in period for MCMC")
+    parser.add_argument('--save_freq', type=int, default=5, nargs='?', help="how often to save samples after burn in")
     parser.add_argument('--rand_walk_stds', type=str, default="0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001", nargs='?', 
                        help="stds for gaussian random walk in MCMC (one for each param)")
 
     # beta, q, delta, rho, gamma_mild, gamma_wild, k
     args = parser.parse_args()
+    return args
+
+
+if __name__ == '__main__':
+    dirname = os.path.dirname(__file__)
+    args = parse_arguments()
     bounds=[(0, 6), (0, np.inf), (0.08, 0.92), (0., 0.9), (0., 0.9), (0., 0.9), (0, 1)]
     params = [float(param) for param in args.params.split(',')] # italy
     rand_walk_stds = [float(std) for std in args.rand_walk_stds.split(',')]
@@ -723,7 +749,6 @@ if __name__ == '__main__':
 
     N, D_wild, dates = read_dataset(in_filename, start, end, n, params[6]) # k = smoothing factor
     # Imild(0), Iwild(0)
-    delta = params[2]
     inits = [int(init) for init in args.inits.split(',')]
     priors = [(2, 10)]*len(params) # no need to change
     
@@ -762,17 +787,5 @@ if __name__ == '__main__':
 
     R0ts_mean, R0ts_std = R0ts
     CI_FACTOR = 1.96
-    line, = plt.plot(dates[1:], R0ts_mean[1:], marker='o', linestyle='solid', linewidth=2, markersize=5, label='Effective R0(t)')
-    plt.fill_between(dates[1:], R0ts_mean[1:]-CI_FACTOR*R0ts_std[1:], R0ts_mean[1:]+CI_FACTOR*R0ts_std[1:],facecolor='b',alpha=0.2)
-    point = plt.stem([lockdown], [R0ts_mean[t_ctrl]], linefmt='C1-', markerfmt='C1o', label='lockdown', use_line_collection=True)
-    
-    plt.xticks(fontsize=12)
-    plt.yticks(fontsize=12)
-    plt.legend(handles=[line, point], fontsize=12)
-    plt.title(args.infile, fontsize=16)
-    
-    ax = plt.gca()
-    ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
-    ax.xaxis.set_minor_locator(mdates.DayLocator(interval=1))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
-    plt.show()
+
+    plot_R0ts(R0ts_mean, R0ts_std, CI_FACTOR, out_filename)
