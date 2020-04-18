@@ -2,8 +2,11 @@ import argparse
 import numpy as np 
 import scipy as sp
 import pandas as pd
+from pandas.plotting import register_matplotlib_converters
+register_matplotlib_converters()
 from scipy import stats, optimize, interpolate
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 import time
 from datetime import datetime
@@ -38,7 +41,6 @@ def metropolis_hastings(x, data, fn, proposal, conditions_fn, burn_in=1):
         accept_log_prob = min(0, fn(x_new, data_new) - fn(x, data))
         p = np.log(np.random.uniform(0, 1))
         if p <= accept_log_prob:
-            # if accept_log_prob < 0: print("accepted new state")
             x, data = x_new, data_new #, fn(x_new, data_new), fn(x, data)
         else:
             pass
@@ -157,10 +159,8 @@ def train(N, D_wild, inits, params, priors, rand_walk_stds, t_ctrl, tau, n_iter,
 
     R0ts_mean = np.mean(saved_R0ts, axis=0)
     R0ts_std = np.std(saved_R0ts, axis=0)
-    R0ts_low = R0ts_mean - CI_FACTOR * R0ts_std
-    R0ts_high = R0ts_mean + CI_FACTOR * R0ts_std
-
-    return C, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_low, R0ts_high)
+    
+    return C, np.mean(saved_params, axis=0), np.std(saved_params, axis=0), (R0_low, R0_high), (R0ts_mean, R0ts_std)
 
 
 def round_int(x):
@@ -206,9 +206,9 @@ def sample_x(x, data, conditions_fn, data_fn):
     """
     n_tries = 0
     x_new = np.copy(x)
-    while n_tries < 1000:
+    while n_tries < 100:
         n_tries += 1
-        t_new = np.random.choice(np.nonzero(x_new >= 1)[0], min(10, len(np.nonzero(x_new)[0])), replace=False)
+        t_new = np.random.choice(np.nonzero(x_new >= 1)[0], min(15, len(np.nonzero(x_new)[0])), replace=False)
         t_tilde = np.random.choice(range(len(x)), len(t_new), replace=False)
         # t_new += 1
         assert(x_new[t_new] >= 1).all()
@@ -220,8 +220,8 @@ def sample_x(x, data, conditions_fn, data_fn):
             # 80 and 79 makes the dist symmetric
             # 79 is the solution 'y' of
             # (n+n/y)-(n+n/y)/80) = n
-            change_add = np.copy(x_new[t_tilde]//99)
-            change_subs = np.copy(x_new[t_new]//100)
+            change_add = np.copy(x_new[t_tilde]//79)
+            change_subs = np.copy(x_new[t_new]//80)
         
         x_new[t_new] -= change_subs
         x_new[t_tilde] += change_add
@@ -229,16 +229,12 @@ def sample_x(x, data, conditions_fn, data_fn):
         data_new = data_fn(x_new)
 
         if conditions_fn(x_new, data_new):
-            # assert (S_new >= x_new).all()
-            # assert(x_new >= 0).all()
-            # print("sample found")
             return x_new, data_new
         else:
             # revert back the changes
             x_new[t_new] += change_subs
             x_new[t_tilde] -= change_add
 
-    # assert (E >= 0).all() and (E+I > 0).all()
     # print("no sample found")
     return x, data
 
@@ -279,7 +275,6 @@ def sample_B(B, variables, inits, params, t_ctrl, epsilon):
 
     return B, S, E, log_prob_new, log_prob_old
 
-
 def sample_C(C, variables, inits, params, t_ctrl, epsilon):
     """
     get a sample from p(B|C, D, params) using metropolis hastings
@@ -319,7 +314,6 @@ def sample_C(C, variables, inits, params, t_ctrl, epsilon):
 
     return C, E, I_mild, I_wild, P, log_prob_new, log_prob_old
 
-
 def sample_D_mild(D_mild, variables, inits, params, t_ctrl, epsilon):
     """
     get a sample from p(B|C, D, params) using metropolis hastings
@@ -357,7 +351,6 @@ def sample_D_mild(D_mild, variables, inits, params, t_ctrl, epsilon):
     I_mild = data[0]
     P = compute_P(transmission_rate(beta, q, t_ctrl, t_end), I_mild, I_wild, N)
     return [D_mild] + data + [P, log_prob_new, log_prob_old]
-
 
 def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsilon, bounds):
     """
@@ -410,7 +403,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
         """
         S, E, I_mild, I_wild, P, N = data
         n_tries = 0
-        while n_tries < 1000:
+        while n_tries < 100:
             n_tries += 1
             
             x_new = np.random.normal(x, rand_walk_stds)
@@ -432,7 +425,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
             if conditions_fn(x_new, data_new):
                 # print(x_new-x, fn(x_new, data_new)-fn(x, data))
                 return x_new, data_new
-        # print("sample not found")
+        print("sample not found")
         return x, data
     
     def conditions_fn(x, data):
@@ -455,6 +448,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
             a, b = bounds[i]
             param = x[i]
             if x[i] < a or x[i] > b:
+                print("failed here")
                 return False
         return True
 
@@ -560,7 +554,7 @@ def read_dataset(filepath, start, end, n, k):
     D_wild[D_wild <= 0] = 0
     N = round_int(N/k)
     N[N < 1] = 1
-    return N, round_int(D_wild)
+    return N, round_int(D_wild), df['date'][start_offset: -end_offset]
 
 
 def initialize(inits, params, N, D_wild, t_ctrl, attempt=100):
@@ -686,7 +680,7 @@ if __name__ == '__main__':
     dirname = os.path.dirname(__file__)
     default_in_dir = '../datasets'
     default_out_dir = '../output'
-    default_in_filename = 'korea_mar_30.csv'
+    default_in_filename = 'korea_april_16.csv'
     if not os.path.exists(default_out_dir):
         os.makedirs(default_out_dir)
 
@@ -697,23 +691,24 @@ if __name__ == '__main__':
                         default=default_in_dir, nargs='?')
     parser.add_argument('--outdir', type=str, help='Directory for the location of the output file',
                         default=default_out_dir, nargs='?')
-    parser.add_argument('--params', type=str, default="1., 0.01, 0.6, 0.2, 0.18, 0.4, 0.05", nargs='?', 
+    parser.add_argument('--inits', type=str, default="1000, 5, 6", nargs='?', help="inits e0, imild0, iwild0")
+    parser.add_argument('--params', type=str, default="2, 0.02, 0.5, 0.6, 0.12, 0.2, 0.2", nargs='?', 
                         help="inits for beta, q, delta, rho, gamma_mild, gamma_wild, k")
     parser.add_argument('--n', type=int, default=3, nargs='?', help="number of entries to take rolling mean over")
-    parser.add_argument('--start', type=str, default='2020-02-14', nargs='?', 
+    parser.add_argument('--start', type=str, default='2020-02-18', nargs='?', 
                         help="first day in the model in YYYY-MM-DD format")
-    parser.add_argument('--end', type=str, default='2020-03-23', nargs='?', help="last day in the model in YYYY-MM-DD format")
+    parser.add_argument('--end', type=str, default='2020-04-15', nargs='?', help="last day in the model in YYYY-MM-DD format")
     parser.add_argument('--lockdown', type=str, default='2020-02-28', nargs='?', 
                         help="the day on which national lockdown was imposed in YYYY-MM-DD format")
-    parser.add_argument('--n_iter', type=int, default=60000, nargs='?', help="number of iterations")
-    parser.add_argument('--n_burn_in', type=int, default=20000, nargs='?', help="burn in period for MCMC")
-    parser.add_argument('--save_freq', type=int, default=500, nargs='?', help="how often to save samples after burn in")
-    parser.add_argument('--rand_walk_stds', type=str, default="0.001, 0.001, 0.005, 0.002, 0.001, 0.001, 0.002", nargs='?', 
+    parser.add_argument('--n_iter', type=int, default=2000, nargs='?', help="number of iterations")
+    parser.add_argument('--n_burn_in', type=int, default=1000, nargs='?', help="burn in period for MCMC")
+    parser.add_argument('--save_freq', type=int, default=50, nargs='?', help="how often to save samples after burn in")
+    parser.add_argument('--rand_walk_stds', type=str, default="0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001", nargs='?', 
                        help="stds for gaussian random walk in MCMC (one for each param)")
 
     # beta, q, delta, rho, gamma_mild, gamma_wild, k
     args = parser.parse_args()
-    bounds=[(0, 2), (0, np.inf), (0.08, 0.92), (0., 0.5), (0., 0.5), (0., 0.5), (0, 1)]
+    bounds=[(0, 6), (0, np.inf), (0.08, 0.92), (0., 0.9), (0., 0.9), (0., 0.9), (0, 1)]
     params = [float(param) for param in args.params.split(',')] # italy
     rand_walk_stds = [float(std) for std in args.rand_walk_stds.split(',')]
     assert len(params) == 7 and len(rand_walk_stds) == 7, "Need all parameters and their random walk stds"
@@ -721,16 +716,15 @@ if __name__ == '__main__':
     start, end = datetime.strptime(args.start, '%Y-%m-%d'), datetime.strptime(args.end, '%Y-%m-%d')
     lockdown = datetime.strptime(args.lockdown, '%Y-%m-%d')
     in_filename = os.path.join(dirname, args.indir + '/'+ args.infile)
-    out_filename = os.path.join(dirname, 
-        args.outdir+f"/seir__{args.infile}_start{start.strftime('%Y-%m-%d')}_lockdown{lockdown.strftime('%Y-%m-%d')}_end{end.strftime('%Y-%m-%d')}.txt")
+    out_filename = args.outdir+f"/seir_{args.infile}_start{start.strftime('%m-%d')}_lockdown{lockdown.strftime('%m-%d')}_end{end.strftime('%m-%d')}.txt"
 
     t_ctrl = (lockdown-start).days          # day on which control measurements were introduced
     assert t_ctrl >= 0
 
-    N, D_wild = read_dataset(in_filename, start, end, n, params[6]) # k = smoothing factor
+    N, D_wild, dates = read_dataset(in_filename, start, end, n, params[6]) # k = smoothing factor
     # Imild(0), Iwild(0)
     delta = params[2]
-    inits = [1000, 500, 600]
+    inits = [int(init) for init in args.inits.split(',')]
     priors = [(2, 10)]*len(params) # no need to change
     
     tau = 1000           # no need to change
@@ -739,44 +733,46 @@ if __name__ == '__main__':
     save_freq = args.save_freq
     
     
-    params_mean, params_std, R0_conf, R0ts_conf = train(N, D_wild, inits, params, priors, 
+    params_mean, params_std, R0_conf, R0ts = train(N, D_wild, inits, params, priors, 
                                                         rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds, save_freq
                                                        )[1:]
     print(f"\nFINAL RESULTS\n\ninput file{in_filename}")
     print(f"ouput file: {out_filename}")
     print(f"param inits: {params}")
-    print(f"start:{start}, lockdown:{lockdown}")
+    print(f"start:{start.strftime('%Y-%m-%d')}, lockdown:{lockdown.strftime('%Y-%m-%d')}")
     print(f"parameters (beta, q, delta, rho, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
           +f"R0 95% confidence interval: {R0_conf}\n\n"
-          +f"R0[t] 95% confidence interval: {R0ts_conf}"
+          +f"R0[t] mean and std: {R0ts}"
         )
-    low, high = R0ts_conf
     
     with open(out_filename, 'w') as out:
         out.write("SEIR MODEL FOR R0t PREDICTION\n---   ---   ---   ---   ---\n"
                  +f"dataset name: {in_filename}\n"
                  +f"output filename: {out_filename}\n\n"
                  +f"inits (imild0, iwild0): {inits}, rand_walk_stds:{rand_walk_stds}\n"
-                 +f"lockdown:{lockdown}, t_end:{len(N)}, n_iter:{n_iter}, n_burn_in:{n_burn_in}, save_freq:{save_freq}\n"
-                 +f"start:{start}, end:{end}, n:{n}\n"
+                 +f"lockdown:{lockdown.strftime('%Y-%m-%d')}, t_end:{len(N)}, n_iter:{n_iter}, n_burn_in:{n_burn_in}, save_freq:{save_freq}\n"
+                 +f"start:{start.strftime('%Y-%m-%d')}, end:{end.strftime('%Y-%m-%d')}, n:{n}\n"
                  +f"bounds:{bounds}\n"
                  +f"param inits:{params}\n"
                  +f"parameters (beta, q, delta, rho, gamma_mild, gamma_wild, k): mean: {params_mean}, std={params_std}\n\n"
                  +f"R0 95% confidence interval: {R0_conf}\n\n"
-                 +f"R0[t] 95% confidence interval: {R0ts_conf}\n"
+                 +f"R0[t] mean and std: {R0ts}\n"
                  )
     out.close()
 
-    mean = (low+high)/2
-    line1, = plt.plot(range(len(low)), low, marker='.', linestyle='dashed', linewidth=2, markersize=4, label='lower bound')
-    line2, = plt.plot(range(len(high)), high, marker='.', linestyle='dashed', linewidth=2, markersize=4, label='upper bound')
-    line3, = plt.plot(range(len(high)), mean, marker='o', linestyle='solid', linewidth=2, markersize=5, label='mean')
- 
-    plt.xlabel('day t', fontsize=12)
-    plt.ylabel('R0_t', fontsize=12)
-     
+    R0ts_mean, R0ts_std = R0ts
+    CI_FACTOR = 1.96
+    line, = plt.plot(dates[1:], R0ts_mean[1:], marker='o', linestyle='solid', linewidth=2, markersize=5, label='Effective R0(t)')
+    plt.fill_between(dates[1:], R0ts_mean[1:]-CI_FACTOR*R0ts_std[1:], R0ts_mean[1:]+CI_FACTOR*R0ts_std[1:],facecolor='b',alpha=0.2)
+    point = plt.stem([lockdown], [R0ts_mean[t_ctrl]], linefmt='C1-', markerfmt='C1o', label='lockdown', use_line_collection=True)
+    
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
-    # plt.ylim(0, 10)
-    plt.legend(handles=[line1, line2, line3], fontsize=12)
+    plt.legend(handles=[line, point], fontsize=12)
+    plt.title(args.infile, fontsize=16)
+    
+    ax = plt.gca()
+    ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
+    ax.xaxis.set_minor_locator(mdates.DayLocator(interval=1))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
     plt.show()
