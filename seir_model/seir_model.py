@@ -459,7 +459,7 @@ def sample_params(params, variables, inits, priors, rand_walk_stds, t_ctrl, epsi
     old_k = k
     data = [S, E, I_mild, I_wild, P, N]
 
-    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn, burn_in=1)
+    params_new, data, log_prob_new, log_prob_old = metropolis_hastings(np.array(params), data, fn, proposal, conditions_fn, burn_in=30)
     beta, q, delta, rho, gamma_mild, gamma_wild, k = params_new
     t_rate = transmission_rate(beta, q, t_ctrl, t_end)
     # R0t = (sum(D_mild)+sum(D_wild))*t_rate /((sum(D_mild)*gamma_mild+sum(D_wild)*gamma_wild)) * S/N
@@ -736,7 +736,7 @@ if __name__ == '__main__':
     params_mean, params_std, R0_conf, R0ts = train(N, D_wild, inits, params, priors, 
                                                         rand_walk_stds, t_ctrl, tau, n_iter, n_burn_in, bounds, save_freq
                                                        )[1:]
-    print(f"\nFINAL RESULTS\n\ninput file{in_filename}")
+    print(f"\nFINAL RESULTS\n\ninput file: {in_filename}")
     print(f"ouput file: {out_filename}")
     print(f"param inits: {params}")
     print(f"start:{start.strftime('%Y-%m-%d')}, lockdown:{lockdown.strftime('%Y-%m-%d')}")
