@@ -49,7 +49,7 @@ def download_data(arg):
 
 
 if __name__ == '__main__':
-    pairs = [x for x in itertools.combinations(list(range(1, 100)), 2)]
+    pairs = [x for x in itertools.combinations(list(range(1, 514)), 2)]
     print(len(pairs))
     parallel_worker = Parallel(n_jobs=32, backend='threading', verbose=50)
 
