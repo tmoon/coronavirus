@@ -7,7 +7,7 @@ import json
 def download_data(arg):
     id1, id2 = arg
     url = "http://www.rhd.gov.bd/OnlineRoadNetwork/getDistanceLocation.asp?OriginID={}&DestinationID={}&Node_1_ID=0&Node_2_ID=0".format(id1, id2)
-    print("getting", id1, id2)
+    # print("getting", id1, id2)
     res = requests.get(url)
     arr = [id1, id2, res.text]
     with open("upozilla_dist_dump/upozilla_{}_{}.json".format(id1, id2), 'w') as f:
