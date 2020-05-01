@@ -13,21 +13,41 @@ from scipy import stats as sps
 from scipy.interpolate import interp1d
 
 parser = argparse.ArgumentParser(description='Live Rt Estimation')
-parser.add_argument('--rtmax', type=int, default=12, help='max allowed value of Rt', nargs='?')
-parser.add_argument('--gamma', type=float, help='1/serial interval', nargs='?', default=1 / 7)
+parser.add_argument(
+    '--rtmax',
+    type=int,
+    default=12,
+    help='max allowed value of Rt (default: %(default)d)',
+    nargs='?',
+)
+parser.add_argument(
+    '--gamma', type=float, help='1/serial interval (default: %(default)f)', nargs='?', default=1 / 7
+)
 parser.add_argument(
     '--infile',
     type=str,
-    help='input file name. the format should be <country>_<last date of observation>.csv',
+    help='input file name. the format should be <country>_<last date of observation>.csv (default: %(default)s)',
     nargs='?',
     default='germany_april_27.csv',
 )
-parser.add_argument('--indir', type=str, help='input file directory', nargs='?', default='datasets')
-parser.add_argument('--outdir', type=str, help='output file directory', nargs='?', default='rt')
+parser.add_argument(
+    '--indir',
+    type=str,
+    help='input file directory (default: %(default)s)',
+    nargs='?',
+    default='datasets',
+)
+parser.add_argument(
+    '--outdir',
+    type=str,
+    help='output file directory (default: %(default)s)',
+    nargs='?',
+    default='rt',
+)
 parser.add_argument(
     '--cutoff',
     type=int,
-    help='threshold for number of new positive cases to be detected on a single day. estimation begins from that day.',
+    help='threshold for number of new positive cases to be detected on a single day. estimation begins from that day. (default: %(default)d)',
     nargs='?',
     default=25,
 )
