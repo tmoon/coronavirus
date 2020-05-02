@@ -64,7 +64,7 @@ r_t_range = np.linspace(0, R_T_MAX, R_T_MAX * 100 + 1)
 GAMMA = args.gamma
 filedir = args.indir
 filename = args.infile
-country_name = filename[: filename.find('_')]
+country_name = '_'.join(filename.split('_')[:-2])
 cutoff = args.cutoff
 outdir = args.outdir
 
