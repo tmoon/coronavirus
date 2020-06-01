@@ -171,17 +171,3 @@ def get_posteriors(sr, gamma, rt_range, sigma=0.15):
         log_likelihood += np.log(denominator)
 
     return posteriors, log_likelihood
-
-
-data = pd.read_csv(
-        "datasets/bd_april_22.csv",
-        usecols=[0, 1],
-        parse_dates=[0],
-        index_col=[0],
-        names=['date', 'positive'],
-        header=None,
-        skiprows=1,
-        squeeze=False,
-    ).sort_index()
-
-print(estimate_rt(data, region_name="bd"))
